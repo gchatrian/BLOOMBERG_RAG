@@ -305,7 +305,12 @@ def main():
         outlook_config = get_outlook_config()
         persistence_config = get_persistence_config()
         
-        outlook_extractor = OutlookExtractor(outlook_config)
+        outlook_extractor = OutlookExtractor(
+            outlook_config.source_folder,
+            outlook_config.indexed_folder,
+            outlook_config.stubs_folder,
+            outlook_config.processed_folder
+        )
         stub_registry = StubRegistry(persistence_config.stub_registry_json)
         
         print("="*60)

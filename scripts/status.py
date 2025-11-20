@@ -65,8 +65,8 @@ def get_vector_store_stats(vector_store: FAISSVectorStore ) -> dict:
         Dictionary with vector store stats
     """
     return {
-        'size': vector_store.size(),
-        'dimension': vector_store.dimension()
+        'size': vector_store.index.ntotal if hasattr(vector_store, 'index') else 0,
+        'dimension': vector_store.dimension if hasattr(vector_store, 'dimension') else 0
     }
 
 
@@ -126,6 +126,10 @@ def get_top_topics(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
         List of (topic, count) tuples
     """
     try:
+        # Se non ha documenti indicizzati, ritorna lista vuota
+        if not hasattr(vector_store, 'index') or vector_store.index.ntotal == 0:
+            return []
+            
         all_docs = vector_store.get_all_documents()
         all_topics = []
         
@@ -155,6 +159,10 @@ def get_top_authors(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
         List of (author, count) tuples
     """
     try:
+        # Se non ha documenti indicizzati, ritorna lista vuota
+        if not hasattr(vector_store, 'index') or vector_store.index.ntotal == 0:
+            return []
+            
         all_docs = vector_store.get_all_documents()
         all_authors = []
         
@@ -191,9 +199,16 @@ def print_status(detailed: bool = False) -> None:
     vectorstore_config = get_vectorstore_config()
     persistence_config = get_persistence_config()
     
-    outlook_extractor = OutlookExtractor(outlook_config)
+    outlook_extractor = OutlookExtractor(
+        outlook_config.source_folder,
+        outlook_config.indexed_folder,
+        outlook_config.stubs_folder,
+        outlook_config.processed_folder
+    )
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    vector_store = FAISSVectorStore (vectorstore_config)
+    
+    # Crea vector store con dimensione 768 (default sentence-transformers)
+    vector_store = FAISSVectorStore(768)
     
     # Load vector store if exists
     if vectorstore_config.index_path.exists():
