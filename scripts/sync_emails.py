@@ -56,7 +56,7 @@ def setup_logging(verbose: bool = False) -> None:
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(PROJECT_ROOT / 'logs' / 'sync_emails.log')
+            logging.FileHandler(PROJECT_ROOT / 'logs' / 'sync_emails.log', encoding='utf-8')
         ]
     )
 
@@ -96,7 +96,7 @@ def initialize_components(max_emails: int = None):
     document_builder = DocumentBuilder()
     stub_detector = StubDetector()
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    stub_manager = StubManager(outlook_extractor)
+    stub_manager = StubManager(stub_registry)
     stub_matcher = StubMatcher(stub_registry)
     embedding_generator = EmbeddingGenerator(embedding_config)
     
@@ -137,8 +137,8 @@ def generate_stub_report(stub_registry: StubRegistry) -> None:
     logger = logging.getLogger(__name__)
     
     try:
-        reporter = StubReporter(stub_registry)
-        report = reporter.generate_report()
+        reporter = StubReporter()
+        report = reporter.generate_report(stub_registry)
         
         print("\n" + "="*60)
         print("STUB REPORT")

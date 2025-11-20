@@ -31,12 +31,17 @@ class StubMatcher:
     2. Fingerprint match (subject + date, fallback if no Story ID)
     """
     
-    def __init__(self):
-        """Initialize stub matcher."""
+    def __init__(self, registry: StubRegistry):
+        """
+        Initialize stub matcher.
+        
+        Args:
+            registry: StubRegistry instance for stub tracking
+        """
+        self.registry = registry
         self.logger = logging.getLogger(__name__)
     
-    def find_matching_stub(self, email_document: EmailDocument, 
-                          registry: StubRegistry) -> Optional[StubEntry]:
+    def find_matching_stub(self, email_document: EmailDocument) -> Optional[StubEntry]:
         """
         Find matching stub for a complete email.
         
@@ -46,7 +51,6 @@ class StubMatcher:
         
         Args:
             email_document: Complete EmailDocument to match
-            registry: StubRegistry to search
             
         Returns:
             Matching StubEntry or None if no match found
@@ -55,14 +59,14 @@ class StubMatcher:
         story_id = email_document.bloomberg_metadata.story_id
         
         if story_id:
-            stub = self.match_by_story_id(story_id, registry)
+            stub = self.match_by_story_id(story_id)
             if stub:
                 self.logger.info(f"✓ Found stub match by Story ID: {story_id}")
                 return stub
         
         # Fallback to fingerprint match
         fingerprint = email_document.get_fingerprint()
-        stub = self.match_by_fingerprint(fingerprint, registry)
+        stub = self.match_by_fingerprint(fingerprint)
         
         if stub:
             self.logger.info(f"✓ Found stub match by fingerprint: {fingerprint}")
@@ -72,13 +76,12 @@ class StubMatcher:
         self.logger.debug(f"No stub match found for: {email_document.subject[:50]}...")
         return None
     
-    def match_by_story_id(self, story_id: str, registry: StubRegistry) -> Optional[StubEntry]:
+    def match_by_story_id(self, story_id: str) -> Optional[StubEntry]:
         """
         Match by Bloomberg Story ID (primary matching method).
         
         Args:
             story_id: Bloomberg Story ID from complete email
-            registry: StubRegistry to search
             
         Returns:
             Matching pending StubEntry or None
@@ -86,15 +89,14 @@ class StubMatcher:
         if not story_id:
             return None
         
-        return registry.find_by_story_id(story_id)
+        return self.registry.find_by_story_id(story_id)
     
-    def match_by_fingerprint(self, fingerprint: str, registry: StubRegistry) -> Optional[StubEntry]:
+    def match_by_fingerprint(self, fingerprint: str) -> Optional[StubEntry]:
         """
         Match by fingerprint: subject + date (fallback matching method).
         
         Args:
             fingerprint: Fingerprint from complete email
-            registry: StubRegistry to search
             
         Returns:
             Matching pending StubEntry or None
@@ -102,10 +104,9 @@ class StubMatcher:
         if not fingerprint:
             return None
         
-        return registry.find_by_fingerprint(fingerprint)
+        return self.registry.find_by_fingerprint(fingerprint)
     
-    def complete_stub(self, stub_entry: StubEntry, outlook_extractor, 
-                     registry: StubRegistry) -> bool:
+    def complete_stub(self, stub_entry: StubEntry, outlook_extractor) -> bool:
         """
         Complete a stub: move to /processed/ and update registry.
         
@@ -117,7 +118,6 @@ class StubMatcher:
         Args:
             stub_entry: StubEntry to complete
             outlook_extractor: OutlookExtractor instance for moving emails
-            registry: StubRegistry to update
             
         Returns:
             True if completed successfully, False otherwise
@@ -131,7 +131,7 @@ class StubMatcher:
                 return False
             
             # Step 2: Update registry status
-            success = self.update_registry(stub_entry, registry)
+            success = self.update_registry(stub_entry)
             
             if not success:
                 self.logger.error(f"Failed to update registry: {stub_entry.subject[:50]}...")
@@ -169,19 +169,18 @@ class StubMatcher:
             self.logger.error(f"Error moving stub to /processed/: {e}")
             return False
     
-    def update_registry(self, stub_entry: StubEntry, registry: StubRegistry) -> bool:
+    def update_registry(self, stub_entry: StubEntry) -> bool:
         """
         Update registry status to "completed".
         
         Args:
             stub_entry: StubEntry to update
-            registry: StubRegistry instance
             
         Returns:
             True if updated successfully, False otherwise
         """
         try:
-            success = registry.update_status(
+            success = self.registry.update_status(
                 outlook_entry_id=stub_entry.outlook_entry_id,
                 new_status="completed",
                 completed_at=datetime.now()
@@ -197,7 +196,7 @@ class StubMatcher:
             return False
     
     def process_complete_email(self, email_document: EmailDocument, 
-                               outlook_extractor, registry: StubRegistry) -> Tuple[bool, Optional[StubEntry]]:
+                               outlook_extractor) -> Tuple[bool, Optional[StubEntry]]:
         """
         Process complete email: check for matching stub and complete it if found.
         
@@ -209,20 +208,19 @@ class StubMatcher:
         Args:
             email_document: Complete EmailDocument
             outlook_extractor: OutlookExtractor instance
-            registry: StubRegistry instance
             
         Returns:
             Tuple of (match_found: bool, stub_entry: Optional[StubEntry])
         """
         # Find matching stub
-        stub_entry = self.find_matching_stub(email_document, registry)
+        stub_entry = self.find_matching_stub(email_document)
         
         if not stub_entry:
             # No matching stub found, nothing to do
             return False, None
         
         # Complete the stub
-        success = self.complete_stub(stub_entry, outlook_extractor, registry)
+        success = self.complete_stub(stub_entry, outlook_extractor)
         
         if success:
             self.logger.info(f"✓ Successfully completed stub for: {email_document.subject[:50]}...")
@@ -251,8 +249,8 @@ if __name__ == "__main__":
     test_registry_path = Path("test_stub_registry.json")
     registry = StubRegistry(test_registry_path)
     
-    # Create matcher
-    matcher = StubMatcher()
+    # Create matcher with registry
+    matcher = StubMatcher(registry)
     
     # Create test stub entry and add to registry
     stub_entry = StubEntry(
@@ -295,7 +293,7 @@ if __name__ == "__main__":
     
     # Test Story ID matching
     print("\n3. Testing Story ID matching...")
-    found_stub = matcher.match_by_story_id("L123ABC456", registry)
+    found_stub = matcher.match_by_story_id("L123ABC456")
     
     if found_stub:
         print(f"   ✓ Found matching stub: {found_stub.subject[:50]}...")
@@ -307,12 +305,9 @@ if __name__ == "__main__":
     fingerprint = complete_doc.get_fingerprint()
     print(f"   Complete email fingerprint: {fingerprint}")
     
-    # Note: Fingerprint won't match in this test because subjects differ slightly
-    # and dates are different (10:30 vs 12:00 same day)
-    
     # Test find_matching_stub (will use Story ID)
     print("\n5. Testing find_matching_stub...")
-    found = matcher.find_matching_stub(complete_doc, registry)
+    found = matcher.find_matching_stub(complete_doc)
     
     if found:
         print(f"   ✓ Found match: {found.subject[:50]}...")
@@ -320,7 +315,7 @@ if __name__ == "__main__":
     
     # Test update registry (without moving - no Outlook connection)
     print("\n6. Testing registry update...")
-    success = matcher.update_registry(found, registry)
+    success = matcher.update_registry(found)
     
     if success:
         print(f"   ✓ Updated registry status to 'completed'")

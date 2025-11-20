@@ -219,15 +219,21 @@ def rebuild_stub_registry(
     
     for stub_email in stubs_in_folder:
         try:
-            # Register stub
-            stub_registry.register_stub(
+            # Crea StubEntry e registra
+            from models import StubEntry
+            from datetime import datetime
+            
+            stub_entry = StubEntry(
                 outlook_entry_id=stub_email['outlook_entry_id'],
                 story_id=stub_email.get('story_id'),
-                fingerprint=stub_email.get('fingerprint'),
+                fingerprint=f"{stub_email['subject']}_{stub_email['received_time'].strftime('%Y%m%d')}",
                 subject=stub_email['subject'],
-                received_time=stub_email['received_time'],
-                status='pending'
+                received_time=stub_email['received_time'] if isinstance(stub_email['received_time'], datetime) else datetime.fromisoformat(stub_email['received_time']),
+                status='pending',
+                completed_at=None
             )
+            
+            stub_registry.add_stub(stub_entry)
             print(f"  ✓ Registered: {stub_email['subject']}")
             
         except Exception as e:
