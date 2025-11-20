@@ -26,7 +26,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.outlook.extractor import OutlookExtractor
 from src.stub.registry import StubRegistry
-from src.vectorstore.faiss_store import FAISSVectorStore 
+from src.vectorstore.faiss_store import FAISSVectorStore
 from config.settings import (
     get_outlook_config,
     get_vectorstore_config,
@@ -57,7 +57,7 @@ def count_outlook_folders(outlook_extractor: OutlookExtractor) -> dict:
         return {'source': 0, 'indexed': 0, 'stubs': 0, 'processed': 0}
 
 
-def get_vector_store_stats(vector_store: FAISSVectorStore ) -> dict:
+def get_vector_store_stats(vector_store: FAISSVectorStore) -> dict:
     """
     Get vector store statistics.
     
@@ -115,7 +115,7 @@ def get_last_sync_stats(persistence_config) -> dict:
         return None
 
 
-def get_top_topics(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
+def get_top_topics(vector_store: FAISSVectorStore, top_n: int = 10) -> list:
     """
     Get most common topics in indexed documents.
     
@@ -144,7 +144,7 @@ def get_top_topics(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
         return []
 
 
-def get_top_authors(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
+def get_top_authors(vector_store: FAISSVectorStore, top_n: int = 10) -> list:
     """
     Get most common authors in indexed documents.
     
@@ -192,9 +192,14 @@ def print_status(detailed: bool = False) -> None:
     vectorstore_config = get_vectorstore_config()
     persistence_config = get_persistence_config()
     
-    outlook_extractor = OutlookExtractor(outlook_config)
+    outlook_extractor = OutlookExtractor(
+        outlook_config.source_folder,
+        outlook_config.indexed_folder,
+        outlook_config.stubs_folder,
+        outlook_config.processed_folder
+    )
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    vector_store = FAISSVectorStore (vectorstore_config)
+    vector_store = FAISSVectorStore(vectorstore_config)
     
     # Load vector store if exists
     if vectorstore_config.index_path.exists():

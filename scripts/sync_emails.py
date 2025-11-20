@@ -38,7 +38,7 @@ from src.stub.manager import StubManager
 from src.stub.matcher import StubMatcher
 from src.stub.reporter import StubReporter
 from src.embedding.generator import EmbeddingGenerator
-from src.vectorstore.faiss_store import FAISSVectorStore 
+from src.vectorstore.faiss_store import FAISSVectorStore
 from config.settings import (
     get_outlook_config,
     get_embedding_config,
@@ -85,7 +85,12 @@ def initialize_components(max_emails: int = None):
         outlook_config.max_emails_per_sync = max_emails
     
     # Initialize components
-    outlook_extractor = OutlookExtractor(outlook_config)
+    outlook_extractor = OutlookExtractor(
+        outlook_config.source_folder,
+        outlook_config.indexed_folder,
+        outlook_config.stubs_folder,
+        outlook_config.processed_folder
+    )
     content_cleaner = ContentCleaner()
     metadata_extractor = MetadataExtractor()
     document_builder = DocumentBuilder()

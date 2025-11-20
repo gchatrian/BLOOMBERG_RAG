@@ -23,7 +23,7 @@ try:
     from config.settings import get_tool_config, get_vectorstore_config, get_retrieval_config
 except ImportError:
     # Placeholder for development
-    FAISSStore = None
+    FAISSVectorStore = None
     HybridRetriever = None
     EmbeddingGenerator = None
     get_tool_config = lambda: None
@@ -80,12 +80,12 @@ class RetrievalToolkit:
         if self._vector_store is None:
             logger.info("Loading FAISS vector store...")
             # This will use the actual implementation when integrated
-            if FAISSStore is not None:
-                self._vector_store = FAISSStore()
+            if FAISSVectorStore is not None:
+                self._vector_store = FAISSVectorStore()
                 # Load index from disk
                 self._vector_store.load(self.vectorstore_config.index_path)
             else:
-                raise RuntimeError("FAISSStore not available")
+                raise RuntimeError("FAISSVectorStore not available")
         return self._vector_store
     
     @property

@@ -26,7 +26,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.embedding.generator import EmbeddingGenerator
-from src.vectorstore.faiss_store import FAISSVectorStore 
+from src.vectorstore.faiss_store import FAISSVectorStore
 from src.retrieval.hybrid_retriever import HybridRetriever
 from config.settings import (
     get_embedding_config,
