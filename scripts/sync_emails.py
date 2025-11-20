@@ -99,14 +99,17 @@ def initialize_components(max_emails: int = None):
     stub_manager = StubManager(outlook_extractor)
     stub_matcher = StubMatcher(stub_registry)
     embedding_generator = EmbeddingGenerator(embedding_config)
-    vector_store = FAISSVectorStore(vectorstore_config)
     
-    # Load existing vector store if it exists
+    # Load or create vector store
     if vectorstore_config.index_path.exists():
         logger.info(f"Loading existing vector store from {vectorstore_config.index_path}")
-        vector_store.load(vectorstore_config.index_path)
+        vector_store = FAISSVectorStore.load(
+            str(vectorstore_config.index_path),
+            embedding_config.embedding_dim
+        )
     else:
-        logger.info("No existing vector store found, will create new one")
+        logger.info("No existing vector store found, creating new one")
+        vector_store = FAISSVectorStore(embedding_config.embedding_dim)
     
     logger.info("Components initialized successfully")
     

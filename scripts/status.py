@@ -26,7 +26,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.outlook.extractor import OutlookExtractor
 from src.stub.registry import StubRegistry
-from src.vectorstore.faiss_store import FAISSVectorStore
+from src.vectorstore.faiss_store import FAISSVectorStore 
 from config.settings import (
     get_outlook_config,
     get_vectorstore_config,
@@ -45,19 +45,16 @@ def count_outlook_folders(outlook_extractor: OutlookExtractor) -> dict:
         Dictionary with folder counts
     """
     try:
-        counts = {
-            'source': outlook_extractor.count_emails_in_source(),
-            'indexed': outlook_extractor.count_emails_in_indexed(),
-            'stubs': outlook_extractor.count_emails_in_stubs(),
-            'processed': outlook_extractor.count_emails_in_processed()
-        }
+        # FIX: Usa get_folder_counts() invece dei metodi inesistenti
+        outlook_extractor.connect()
+        counts = outlook_extractor.get_folder_counts()
         return counts
     except Exception as e:
         print(f"Warning: Could not access Outlook folders - {e}")
         return {'source': 0, 'indexed': 0, 'stubs': 0, 'processed': 0}
 
 
-def get_vector_store_stats(vector_store: FAISSVectorStore) -> dict:
+def get_vector_store_stats(vector_store: FAISSVectorStore ) -> dict:
     """
     Get vector store statistics.
     
@@ -83,10 +80,12 @@ def get_stub_stats(stub_registry: StubRegistry) -> dict:
     Returns:
         Dictionary with stub stats
     """
-    all_stubs = stub_registry.get_all_stubs()
+    # FIX: Usa stub_registry.stubs invece di get_all_stubs()
+    all_stubs = stub_registry.stubs
     
-    pending = [s for s in all_stubs if s['status'] == 'pending']
-    completed = [s for s in all_stubs if s['status'] == 'completed']
+    # Gli stub sono oggetti StubEntry, non dizionari
+    pending = [s for s in all_stubs if s.status == 'pending']
+    completed = [s for s in all_stubs if s.status == 'completed']
     
     return {
         'total': len(all_stubs),
@@ -115,7 +114,7 @@ def get_last_sync_stats(persistence_config) -> dict:
         return None
 
 
-def get_top_topics(vector_store: FAISSVectorStore, top_n: int = 10) -> list:
+def get_top_topics(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
     """
     Get most common topics in indexed documents.
     
@@ -144,7 +143,7 @@ def get_top_topics(vector_store: FAISSVectorStore, top_n: int = 10) -> list:
         return []
 
 
-def get_top_authors(vector_store: FAISSVectorStore, top_n: int = 10) -> list:
+def get_top_authors(vector_store: FAISSVectorStore , top_n: int = 10) -> list:
     """
     Get most common authors in indexed documents.
     
@@ -192,14 +191,9 @@ def print_status(detailed: bool = False) -> None:
     vectorstore_config = get_vectorstore_config()
     persistence_config = get_persistence_config()
     
-    outlook_extractor = OutlookExtractor(
-        outlook_config.source_folder,
-        outlook_config.indexed_folder,
-        outlook_config.stubs_folder,
-        outlook_config.processed_folder
-    )
+    outlook_extractor = OutlookExtractor(outlook_config)
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    vector_store = FAISSVectorStore(vectorstore_config)
+    vector_store = FAISSVectorStore (vectorstore_config)
     
     # Load vector store if exists
     if vectorstore_config.index_path.exists():

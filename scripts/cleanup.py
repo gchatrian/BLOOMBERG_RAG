@@ -57,14 +57,18 @@ def delete_old_stubs(
     cutoff_date = datetime.now() - timedelta(days=days_old)
     print(f"Cutoff date: {cutoff_date.strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # Get all stubs
-    all_stubs = stub_registry.get_all_stubs()
-    pending_stubs = [s for s in all_stubs if s['status'] == 'pending']
+    # FIX: Usa stub_registry.stubs invece di get_all_stubs()
+    all_stubs = stub_registry.stubs
+    # FIX: Gli stub sono oggetti StubEntry, quindi usa s.status invece di s['status']
+    pending_stubs = [s for s in all_stubs if s.status == 'pending']
     
     # Find old stubs
     old_stubs = []
     for stub in pending_stubs:
-        received_time = datetime.fromisoformat(stub['received_time'])
+        # FIX: received_time è già un datetime object in StubEntry
+        received_time = stub.received_time
+        if isinstance(received_time, str):
+            received_time = datetime.fromisoformat(received_time)
         if received_time < cutoff_date:
             old_stubs.append(stub)
     
@@ -77,7 +81,8 @@ def delete_old_stubs(
     if dry_run:
         print("\nDRY RUN - Would delete:")
         for stub in old_stubs:
-            print(f"  - {stub['subject']} ({stub['received_time']})")
+            # FIX: Usa stub.subject invece di stub['subject']
+            print(f"  - {stub.subject} ({stub.received_time})")
         return 0
     
     # Confirm deletion
@@ -90,7 +95,8 @@ def delete_old_stubs(
     deleted_count = 0
     for stub in old_stubs:
         try:
-            outlook_entry_id = stub['outlook_entry_id']
+            # FIX: Usa stub.outlook_entry_id invece di stub['outlook_entry_id']
+            outlook_entry_id = stub.outlook_entry_id
             
             # Delete from Outlook
             outlook_extractor.delete_email(outlook_entry_id)
@@ -99,10 +105,12 @@ def delete_old_stubs(
             stub_registry.remove_stub(outlook_entry_id)
             
             deleted_count += 1
-            print(f"  ✓ Deleted: {stub['subject']}")
+            # FIX: Usa stub.subject invece di stub['subject']
+            print(f"  ✓ Deleted: {stub.subject}")
             
         except Exception as e:
-            print(f"  ✗ Failed to delete {stub['subject']}: {e}")
+            # FIX: Usa stub.subject invece di stub['subject']
+            print(f"  ✗ Failed to delete {stub.subject}: {e}")
     
     print(f"\nDeleted {deleted_count} stubs")
     return deleted_count
@@ -297,12 +305,7 @@ def main():
         outlook_config = get_outlook_config()
         persistence_config = get_persistence_config()
         
-        outlook_extractor = OutlookExtractor(
-            outlook_config.source_folder,
-            outlook_config.indexed_folder,
-            outlook_config.stubs_folder,
-            outlook_config.processed_folder
-        )
+        outlook_extractor = OutlookExtractor(outlook_config)
         stub_registry = StubRegistry(persistence_config.stub_registry_json)
         
         print("="*60)

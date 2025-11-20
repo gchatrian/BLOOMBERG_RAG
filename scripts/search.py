@@ -323,15 +323,23 @@ def main():
         
         # Load components
         embedding_generator = EmbeddingGenerator(embedding_config)
-        vector_store = FAISSVectorStore(vectorstore_config)
-        vector_store.load(vectorstore_config.index_path)
+        
+        if vectorstore_config.index_path.exists():
+            vector_store = FAISSVectorStore.load(
+                str(vectorstore_config.index_path),
+                embedding_config.embedding_dim
+            )
+        else:
+            print(f"\nError: Vector store not found at {vectorstore_config.index_path}")
+            print("Run 'python scripts/sync_emails.py' first to index emails")
+            return 1
         
         retriever = HybridRetriever(
             vector_store=vector_store,
             embedding_generator=embedding_generator
         )
         
-        print(f"Loaded {vector_store.size()} documents")
+        print(f"Loaded {vector_store.get_index_size()} documents")
         
         # Execute
         if args.interactive:

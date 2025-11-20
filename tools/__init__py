@@ -81,9 +81,16 @@ class RetrievalToolkit:
             logger.info("Loading FAISS vector store...")
             # This will use the actual implementation when integrated
             if FAISSVectorStore is not None:
-                self._vector_store = FAISSVectorStore()
-                # Load index from disk
-                self._vector_store.load(self.vectorstore_config.index_path)
+                # Load existing or create new
+                if self.vectorstore_config.index_path.exists():
+                    from config.settings import get_embedding_config
+                    embedding_config = get_embedding_config()
+                    self._vector_store = FAISSVectorStore.load(
+                        str(self.vectorstore_config.index_path),
+                        embedding_config.embedding_dim
+                    )
+                else:
+                    raise RuntimeError("Vector store not found. Run sync first.")
             else:
                 raise RuntimeError("FAISSVectorStore not available")
         return self._vector_store
