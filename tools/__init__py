@@ -1,0 +1,258 @@
+"""
+Google ADK Tools for Bloomberg RAG System.
+
+This module provides tool functions that expose retrieval capabilities
+to the Google ADK agent. Each tool is a Python function with detailed
+docstrings that Google ADK uses to determine when to call the tool.
+
+The RetrievalToolkit class manages the vector store and provides
+helper methods for all tools.
+"""
+
+import logging
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from pathlib import Path
+
+# These imports will be available when integrated with full project
+# For now, we define the interface
+try:
+    from src.vectorstore.faiss_store import FAISSVectorStore
+    from src.retrieval.hybrid_retriever import HybridRetriever
+    from src.embedding.generator import EmbeddingGenerator
+    from config.settings import get_tool_config, get_vectorstore_config, get_retrieval_config
+except ImportError:
+    # Placeholder for development
+    FAISSStore = None
+    HybridRetriever = None
+    EmbeddingGenerator = None
+    get_tool_config = lambda: None
+    get_vectorstore_config = lambda: None
+    get_retrieval_config = lambda: None
+
+logger = logging.getLogger(__name__)
+
+
+class RetrievalToolkit:
+    """
+    Manages vector store and provides helper methods for Google ADK tools.
+    
+    This class is instantiated once and shared across all tool functions.
+    It loads the FAISS vector store, embedding generator, and retriever
+    on initialization.
+    """
+    
+    def __init__(self):
+        """Initialize the toolkit by loading vector store and retriever."""
+        logger.info("Initializing RetrievalToolkit...")
+        
+        # Load configurations
+        self.tool_config = get_tool_config()
+        self.vectorstore_config = get_vectorstore_config()
+        self.retrieval_config = get_retrieval_config()
+        
+        # Initialize components
+        self._embedding_generator = None
+        self._vector_store = None
+        self._retriever = None
+        
+        # Cache for results (if enabled)
+        self._cache = {} if self.tool_config.enable_caching else None
+        
+        # Load components lazily on first use
+        logger.info("RetrievalToolkit initialized (lazy loading enabled)")
+    
+    @property
+    def embedding_generator(self):
+        """Lazy load embedding generator."""
+        if self._embedding_generator is None:
+            logger.info("Loading embedding generator...")
+            # This will use the actual implementation when integrated
+            if EmbeddingGenerator is not None:
+                self._embedding_generator = EmbeddingGenerator()
+            else:
+                raise RuntimeError("EmbeddingGenerator not available")
+        return self._embedding_generator
+    
+    @property
+    def vector_store(self):
+        """Lazy load vector store."""
+        if self._vector_store is None:
+            logger.info("Loading FAISS vector store...")
+            # This will use the actual implementation when integrated
+            if FAISSStore is not None:
+                self._vector_store = FAISSStore()
+                # Load index from disk
+                self._vector_store.load(self.vectorstore_config.index_path)
+            else:
+                raise RuntimeError("FAISSStore not available")
+        return self._vector_store
+    
+    @property
+    def retriever(self):
+        """Lazy load hybrid retriever."""
+        if self._retriever is None:
+            logger.info("Loading hybrid retriever...")
+            # This will use the actual implementation when integrated
+            if HybridRetriever is not None:
+                self._retriever = HybridRetriever(
+                    vector_store=self.vector_store,
+                    embedding_generator=self.embedding_generator
+                )
+            else:
+                raise RuntimeError("HybridRetriever not available")
+        return self._retriever
+    
+    def format_article(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format article data for tool response.
+        
+        Args:
+            article_data: Raw article data from retriever
+            
+        Returns:
+            Formatted article dictionary with standardized fields
+        """
+        # Extract metadata
+        metadata = article_data.get("metadata", {})
+        bloomberg_meta = metadata.get("bloomberg_metadata", {})
+        
+        # Determine content (snippet or full)
+        content = article_data.get("body", "")
+        if not self.tool_config.include_full_content:
+            # Create snippet
+            content = content[:self.tool_config.max_snippet_length]
+            if len(article_data.get("body", "")) > self.tool_config.max_snippet_length:
+                content += "..."
+        
+        return {
+            "subject": article_data.get("subject", ""),
+            "date": bloomberg_meta.get("article_date", metadata.get("date", "")),
+            "author": bloomberg_meta.get("author", ""),
+            "topics": bloomberg_meta.get("topics", []),
+            "people": bloomberg_meta.get("people", []),
+            "tickers": bloomberg_meta.get("tickers", []),
+            "content": content,
+            "score": article_data.get("score", 0.0)
+        }
+    
+    def format_response(
+        self,
+        articles: List[Dict[str, Any]],
+        query_info: Dict[str, Any],
+        success: bool = True,
+        message: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Format standardized tool response.
+        
+        Args:
+            articles: List of article dictionaries
+            query_info: Information about the query
+            success: Whether the operation was successful
+            message: Additional message (e.g., error message)
+            
+        Returns:
+            Standardized response dictionary
+        """
+        # Limit number of articles
+        limited_articles = articles[:self.tool_config.max_articles_per_call]
+        
+        # Format each article
+        formatted_articles = [self.format_article(article) for article in limited_articles]
+        
+        return {
+            "success": success,
+            "articles": formatted_articles,
+            "count": len(formatted_articles),
+            "query_info": {
+                **query_info,
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            "message": message or (
+                f"Found {len(formatted_articles)} articles" if success
+                else "Operation failed"
+            )
+        }
+    
+    def search_semantic(self, query: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Perform semantic search.
+        
+        Args:
+            query: Search query
+            top_k: Number of results (uses config default if None)
+            
+        Returns:
+            List of article dictionaries
+        """
+        top_k = top_k or self.tool_config.default_top_k
+        
+        # Generate query embedding
+        query_embedding = self.embedding_generator.encode_single(query)
+        
+        # Search vector store
+        results = self.vector_store.search(query_embedding, top_k=top_k)
+        
+        return results
+    
+    def search_hybrid(
+        self,
+        query: str,
+        filters: Optional[Dict[str, Any]] = None,
+        top_k: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid search (semantic + temporal + filters).
+        
+        Args:
+            query: Search query
+            filters: Optional metadata filters
+            top_k: Number of results (uses config default if None)
+            
+        Returns:
+            List of article dictionaries
+        """
+        top_k = top_k or self.tool_config.default_top_k
+        
+        # Use hybrid retriever
+        results = self.retriever.search(
+            query=query,
+            top_k=top_k,
+            filters=filters,
+            recency_weight=self.retrieval_config.recency_weight
+        )
+        
+        return results
+
+
+# ============================================================================
+# GLOBAL TOOLKIT INSTANCE
+# ============================================================================
+
+_toolkit_instance: Optional[RetrievalToolkit] = None
+
+
+def get_toolkit() -> RetrievalToolkit:
+    """
+    Get or create the global RetrievalToolkit instance.
+    
+    Returns:
+        RetrievalToolkit instance
+    """
+    global _toolkit_instance
+    
+    if _toolkit_instance is None:
+        _toolkit_instance = RetrievalToolkit()
+    
+    return _toolkit_instance
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'RetrievalToolkit',
+    'get_toolkit'
+]
