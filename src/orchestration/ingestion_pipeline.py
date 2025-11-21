@@ -101,6 +101,10 @@ class IngestionPipeline:
         self.stats = IngestionStats(start_time=datetime.now())
         
         try:
+            # Step 0: Connect to Outlook
+            logger.info("Connecting to Outlook...")
+            self.outlook_extractor.connect()
+            
             # Step 1: Extract emails from source folder
             raw_emails = self._extract_emails()
             self.stats.total_emails_processed = len(raw_emails)
@@ -124,6 +128,13 @@ class IngestionPipeline:
             logger.error(f"Ingestion pipeline failed: {e}", exc_info=True)
             self.stats.end_time = datetime.now()
             raise
+        finally:
+            # Always close Outlook connection
+            try:
+                self.outlook_extractor.close()
+                logger.info("Outlook connection closed")
+            except:
+                pass
     
     def _extract_emails(self) -> List[Dict[str, Any]]:
         """
@@ -134,7 +145,6 @@ class IngestionPipeline:
         """
         try:
             # Extract only from source folder (skip indexed, stubs, processed)
-            self.outlook_extractor.connect()
             emails = self.outlook_extractor.extract_emails()
             return emails
         except Exception as e:
@@ -154,7 +164,10 @@ class IngestionPipeline:
         logger.info(f"Processing email: {subject}")
         
         # Step 1: Detect if stub or complete
-        is_stub = self.stub_detector.detect_from_email(raw_email)
+        is_stub = self.stub_detector.is_stub(
+            body=raw_email.get('body', ''),
+            cleaned_body=self.content_cleaner.clean(raw_email.get('body', ''))
+        )
         
         if is_stub:
             self._process_stub(raw_email)
@@ -174,26 +187,21 @@ class IngestionPipeline:
         logger.info(f"Detected STUB: {subject}")
         
         try:
-            # Extract story ID and create fingerprint using detector
+            # Extract story ID and create fingerprint
             story_id = self.stub_detector.extract_story_id(raw_email)
             fingerprint = self.stub_detector.create_fingerprint(raw_email)
             
-            # Create StubEntry
-            from models import StubEntry
-            stub_entry = StubEntry(
+            # Register stub
+            self.stub_registry.register_stub(
                 outlook_entry_id=outlook_entry_id,
                 story_id=story_id,
                 fingerprint=fingerprint,
                 subject=subject,
-                received_time=raw_email.get('received_time'),
-                status="pending"
+                received_time=raw_email.get('received_time')
             )
             
-            # Register stub using add_stub
-            self.stub_registry.add_stub(stub_entry)
-            
             # Move to /stubs/ folder
-            self.stub_manager.move_stub_to_folder(outlook_entry_id, self.outlook_extractor)
+            self.stub_manager.move_to_stubs(outlook_entry_id)
             
             self.stats.stubs_created += 1
             logger.info(f"Stub registered and moved to /stubs/: {subject}")
@@ -234,34 +242,29 @@ class IngestionPipeline:
                 matched_stub = self.stub_matcher.match_by_story_id(story_id)
             
             if not matched_stub:
-                # Fallback: try to match by fingerprint using detector
+                # Fallback: try to match by fingerprint
                 fingerprint = self.stub_detector.create_fingerprint(raw_email)
                 matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint)
             
             # Step 4: If stub match found, move stub to /processed/
             if matched_stub:
                 logger.info(f"Found matching stub for {subject}, moving stub to /processed/")
-                self.outlook_extractor.move_to_processed(matched_stub.outlook_entry_id)
-                self.stub_registry.update_status(matched_stub.outlook_entry_id, "completed")
+                self.stub_manager.move_to_processed(matched_stub['outlook_entry_id'])
+                self.stub_registry.mark_completed(matched_stub['outlook_entry_id'])
                 self.stats.stubs_completed += 1
             
             # Step 5: Build EmailDocument
             email_document = self.document_builder.build(
                 raw_email_data=raw_email,
                 cleaned_body=cleaned_content,
-                metadata=metadata,
-                status="complete",
-                is_stub=False
+                metadata=metadata
             )
             
             # Step 6: Generate embedding
-            embedding = self.embedding_generator.encode_single(email_document.full_text)
+            embedding = self.embedding_generator.generate_single_embedding(email_document.get_full_text())
             
             # Step 7: Add to vector store
-            self.vector_store.add_document(
-                embedding=embedding,
-                document=email_document
-            )
+            self.vector_store.add_vectors(embedding.reshape(1, -1))
             
             # Step 8: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)
@@ -281,9 +284,18 @@ class IngestionPipeline:
         logger.info("INGESTION PIPELINE COMPLETED")
         logger.info("="*60)
         logger.info(f"Total emails processed: {self.stats.total_emails_processed}")
-        logger.info(f"Complete emails to /indexed/: {self.stats.complete_indexed}")
-        logger.info(f"New stubs to /stubs/: {self.stats.stubs_created}")
-        logger.info(f"Stubs completed to /processed/: {self.stats.stubs_completed}")
+        logger.info(f"Complete emails indexed: {self.stats.complete_indexed}")
+        logger.info(f"New stubs created: {self.stats.stubs_created}")
+        logger.info(f"Stubs completed (matched): {self.stats.stubs_completed}")
         logger.info(f"Errors: {self.stats.errors}")
         logger.info(f"Duration: {duration:.2f} seconds")
         logger.info("="*60)
+    
+    def get_stats(self) -> IngestionStats:
+        """
+        Get current ingestion statistics.
+        
+        Returns:
+            IngestionStats object
+        """
+        return self.stats

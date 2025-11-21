@@ -130,7 +130,7 @@ class EmailDocument:
     def __repr__(self) -> str:
         """Human-readable representation."""
         date_str = self.received_date.strftime("%Y-%m-%d")
-        status_emoji = "OK" if self.status == "complete" else "⏳" if self.status == "stub" else "📦"
+        status_emoji = "✓" if self.status == "complete" else "⏳" if self.status == "stub" else "📦"
         
         return (
             f"EmailDocument({status_emoji} {self.subject[:50]}... | "
@@ -268,7 +268,7 @@ class StubEntry:
     story_id: Optional[str]
     fingerprint: str
     subject: str
-    received_time: datetime
+    received_time: Optional[datetime]
     status: str = "pending"  # "pending" or "completed"
     completed_at: Optional[datetime] = None
     
@@ -279,7 +279,7 @@ class StubEntry:
             "story_id": self.story_id,
             "fingerprint": self.fingerprint,
             "subject": self.subject,
-            "received_time": self.received_time.isoformat(),
+            "received_time": self.received_time.isoformat() if self.received_time else None,
             "status": self.status,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
@@ -287,14 +287,15 @@ class StubEntry:
     @classmethod
     def from_dict(cls, data: dict) -> "StubEntry":
         """Create from dictionary."""
-        data["received_time"] = datetime.fromisoformat(data["received_time"])
+        if data.get("received_time"):
+            data["received_time"] = datetime.fromisoformat(data["received_time"])
         if data.get("completed_at"):
             data["completed_at"] = datetime.fromisoformat(data["completed_at"])
         return cls(**data)
     
     def __repr__(self) -> str:
         """Human-readable representation."""
-        status_emoji = "⏳" if self.status == "pending" else "OK"
+        status_emoji = "⏳" if self.status == "pending" else "✓"
         return f"StubEntry({status_emoji} {self.subject[:40]}... | {self.story_id or 'no ID'})"
 
 
