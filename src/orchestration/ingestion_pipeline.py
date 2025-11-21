@@ -189,9 +189,14 @@ class IngestionPipeline:
         logger.info(f"Detected STUB: {subject}")
         
         try:
-            # Extract story ID from metadata (may be None for stubs)
-            metadata = self.metadata_extractor.extract(raw_email, cleaned_body)
-            story_id = metadata.get('story_id')
+            # Extract metadata (signature corretta: subject, body, received_date)
+            metadata = self.metadata_extractor.extract(
+                subject=subject,
+                body=cleaned_body,
+                received_date=received_time
+            )
+            
+            story_id = metadata.story_id  # È un BloombergMetadata object
             
             # Create fingerprint for matching
             fingerprint = self.stub_registry.create_fingerprint(subject, received_time)
@@ -233,19 +238,24 @@ class IngestionPipeline:
         logger.info(f"Detected COMPLETE: {subject}")
         
         try:
-            # Step 1: Extract metadata
-            metadata = self.metadata_extractor.extract(raw_email, cleaned_content)
-            
-            # Step 2: Build EmailDocument
-            email_document = self.document_builder.build(
-                outlook_entry_id=outlook_entry_id,
+            # Step 1: Extract metadata (signature corretta: subject, body, received_date)
+            metadata = self.metadata_extractor.extract(
                 subject=subject,
                 body=cleaned_content,
-                metadata=metadata
+                received_date=raw_email.get('received_date')
+            )
+            
+            # Step 2: Build EmailDocument (signature corretta)
+            email_document = self.document_builder.build(
+                raw_email_data=raw_email,
+                cleaned_body=cleaned_content,
+                metadata=metadata,
+                status="complete",
+                is_stub=False
             )
             
             # Step 3: Check for stub match
-            story_id = metadata.get('story_id')
+            story_id = metadata.story_id  # È un BloombergMetadata object
             matched_stub = None
             
             if story_id:

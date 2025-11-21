@@ -107,7 +107,10 @@ def initialize_components(max_emails: int = None):
     content_cleaner = ContentCleaner()
     metadata_extractor = MetadataExtractor()
     document_builder = DocumentBuilder()
+    
+    # StubDetector - NO parameters required (only optional min_complete_length)
     stub_detector = StubDetector()
+    
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
     stub_manager = StubManager(stub_registry)
     stub_matcher = StubMatcher()
