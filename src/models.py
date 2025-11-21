@@ -130,7 +130,7 @@ class EmailDocument:
     def __repr__(self) -> str:
         """Human-readable representation."""
         date_str = self.received_date.strftime("%Y-%m-%d")
-        status_emoji = "✓" if self.status == "complete" else "⏳" if self.status == "stub" else "📦"
+        status_emoji = "OK" if self.status == "complete" else "⏳" if self.status == "stub" else "📦"
         
         return (
             f"EmailDocument({status_emoji} {self.subject[:50]}... | "
@@ -294,7 +294,7 @@ class StubEntry:
     
     def __repr__(self) -> str:
         """Human-readable representation."""
-        status_emoji = "⏳" if self.status == "pending" else "✓"
+        status_emoji = "⏳" if self.status == "pending" else "OK"
         return f"StubEntry({status_emoji} {self.subject[:40]}... | {self.story_id or 'no ID'})"
 
 

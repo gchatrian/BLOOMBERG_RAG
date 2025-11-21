@@ -19,16 +19,16 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 # Import components
-from src.extraction.outlook_extractor import OutlookExtractor
-from src.extraction.content_cleaner import ContentCleaner
-from src.extraction.metadata_extractor import MetadataExtractor
-from src.extraction.document_builder import DocumentBuilder
+from src.outlook.extractor import OutlookExtractor
+from src.processing.cleaner import ContentCleaner
+from src.processing.metadata_extractor import MetadataExtractor
+from src.processing.document_builder import DocumentBuilder
 from src.stub.detector import StubDetector
 from src.stub.registry import StubRegistry
 from src.stub.manager import StubManager
 from src.stub.matcher import StubMatcher
 from src.stub.reporter import StubReporter
-from src.embedding.embedding_generator import EmbeddingGenerator
+from src.embedding.generator import EmbeddingGenerator
 from src.vectorstore.faiss_store import FAISSVectorStore
 from src.orchestration.ingestion_pipeline import IngestionPipeline
 from config.settings import (
@@ -100,7 +100,11 @@ def initialize_components(max_emails: int = None):
     stub_detector = StubDetector(content_cleaner)
     
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    stub_manager = StubManager(outlook_extractor)
+    
+    # CRITICAL: Pass stub_registry to StubManager (NOT outlook_extractor)
+    stub_manager = StubManager(stub_registry)
+    
+    # StubMatcher takes registry in __init__
     stub_matcher = StubMatcher(stub_registry)
     embedding_generator = EmbeddingGenerator(embedding_config)
     
@@ -138,8 +142,8 @@ def generate_stub_report(stub_registry: StubRegistry) -> None:
     Args:
         stub_registry: StubRegistry instance
     """
-    reporter = StubReporter(stub_registry)
-    report = reporter.generate_report()
+    reporter = StubReporter()
+    report = reporter.generate_report(stub_registry)
     print(report)
 
 
@@ -204,8 +208,8 @@ def main():
         
         # Save vector store
         print("\nSaving vector store...")
-        persistence_config = get_persistence_config()
-        vector_store.save(str(persistence_config.faiss_index_path))
+        vectorstore_config = get_vectorstore_config()
+        vector_store.save(str(vectorstore_config.index_path))
         
         # Save stub registry
         stub_registry.save()
@@ -220,9 +224,9 @@ def main():
         print("SYNC COMPLETED SUCCESSFULLY")
         print("="*60)
         print(f"Total emails processed: {stats.total_emails_processed}")
-        print(f"Complete emails → /indexed/: {stats.complete_indexed}")
-        print(f"New stubs → /stubs/: {stats.stubs_created}")
-        print(f"Stubs completed → /processed/: {stats.stubs_completed}")
+        print(f"Complete emails to /indexed/: {stats.complete_indexed}")
+        print(f"New stubs to /stubs/: {stats.stubs_created}")
+        print(f"Stubs completed to /processed/: {stats.stubs_completed}")
         print(f"Errors: {stats.errors}")
         print(f"Duration: {stats.duration_seconds():.2f} seconds")
         print("="*60)

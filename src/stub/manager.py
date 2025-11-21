@@ -72,7 +72,7 @@ class StubManager:
                 self.logger.error(f"Failed to move stub to folder: {email_document.subject[:50]}...")
                 return False
             
-            self.logger.info(f"✓ Processed stub: {email_document.subject[:50]}...")
+            self.logger.info(f"OK Processed stub: {email_document.subject[:50]}...")
             return True
             
         except Exception as e:
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     stub_entry = manager.register_stub(stub_doc)
     
     if stub_entry:
-        print(f"   ✓ Registered: {stub_entry.subject[:50]}...")
+        print(f"   OK Registered: {stub_entry.subject[:50]}...")
         print(f"   Status: {stub_entry.status}")
     
     # Get active stubs
@@ -230,4 +230,4 @@ if __name__ == "__main__":
     # Cleanup test file
     if test_registry_path.exists():
         test_registry_path.unlink()
-        print("\n✓ Cleaned up test registry file")
+        print("\nOK Cleaned up test registry file")

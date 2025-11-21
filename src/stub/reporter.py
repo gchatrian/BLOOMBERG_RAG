@@ -137,7 +137,7 @@ class StubReporter:
         lines.append("-" * 80)
         
         if not stubs:
-            lines.append("✓ No pending stubs - all clear!")
+            lines.append("OK No pending stubs - all clear!")
             lines.append("")
             return lines
         
@@ -228,7 +228,7 @@ class StubReporter:
             lines.append(f"⚠  ACTION REQUIRED: {len(pending_stubs)} stub(s) need manual completion")
             lines.append("   See instructions above for completing stubs via Bloomberg Terminal")
         else:
-            lines.append("✓  All stubs completed - no action required")
+            lines.append("OK  All stubs completed - no action required")
         
         lines.append("=" * 80)
         lines.append("")
@@ -343,4 +343,4 @@ if __name__ == "__main__":
     # Cleanup test file
     if test_registry_path.exists():
         test_registry_path.unlink()
-        print("\n✓ Cleaned up test registry file")
+        print("\nOK Cleaned up test registry file")

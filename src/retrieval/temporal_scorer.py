@@ -22,9 +22,9 @@ class TemporalScorer:
         score = exp(-ln(2) * days_ago / halflife)
     
     This ensures:
-    - Recent articles (days_ago=0) → score=1.0
-    - Articles at halflife age → score=0.5
-    - Old articles → score→0.0
+    - Recent articles (days_ago=0) to score=1.0
+    - Articles at halflife age to score=0.5
+    - Old articles to scoreto0.0
     
     Attributes:
         halflife_days: Number of days for score to decay to 0.5
@@ -114,7 +114,7 @@ class TemporalScorer:
         score = max(0.0, min(1.0, score))
         
         logger.debug(
-            f"Article from {days_ago:.1f} days ago → recency score: {score:.3f}"
+            f"Article from {days_ago:.1f} days ago to recency score: {score:.3f}"
         )
         
         return score

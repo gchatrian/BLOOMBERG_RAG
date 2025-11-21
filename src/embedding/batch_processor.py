@@ -1,7 +1,7 @@
 """
 Indexing Pipeline for Bloomberg RAG System.
 
-Coordinates the complete indexing process: documents → embeddings → vector store + metadata.
+Coordinates the complete indexing process: documents to embeddings to vector store + metadata.
 Handles batch processing, progress tracking, and validation.
 """
 

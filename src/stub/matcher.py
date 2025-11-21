@@ -61,7 +61,7 @@ class StubMatcher:
         if story_id:
             stub = self.match_by_story_id(story_id)
             if stub:
-                self.logger.info(f"✓ Found stub match by Story ID: {story_id}")
+                self.logger.info(f"OK Found stub match by Story ID: {story_id}")
                 return stub
         
         # Fallback to fingerprint match
@@ -69,7 +69,7 @@ class StubMatcher:
         stub = self.match_by_fingerprint(fingerprint)
         
         if stub:
-            self.logger.info(f"✓ Found stub match by fingerprint: {fingerprint}")
+            self.logger.info(f"OK Found stub match by fingerprint: {fingerprint}")
             return stub
         
         # No match found
@@ -137,7 +137,7 @@ class StubMatcher:
                 self.logger.error(f"Failed to update registry: {stub_entry.subject[:50]}...")
                 return False
             
-            self.logger.info(f"✓ Completed stub: {stub_entry.subject[:50]}...")
+            self.logger.info(f"OK Completed stub: {stub_entry.subject[:50]}...")
             return True
             
         except Exception as e:
@@ -223,10 +223,10 @@ class StubMatcher:
         success = self.complete_stub(stub_entry, outlook_extractor)
         
         if success:
-            self.logger.info(f"✓ Successfully completed stub for: {email_document.subject[:50]}...")
+            self.logger.info(f"OK Successfully completed stub for: {email_document.subject[:50]}...")
             return True, stub_entry
         else:
-            self.logger.error(f"✗ Failed to complete stub for: {email_document.subject[:50]}...")
+            self.logger.error(f"ERROR Failed to complete stub for: {email_document.subject[:50]}...")
             return False, stub_entry
 
 
@@ -296,9 +296,9 @@ if __name__ == "__main__":
     found_stub = matcher.match_by_story_id("L123ABC456")
     
     if found_stub:
-        print(f"   ✓ Found matching stub: {found_stub.subject[:50]}...")
+        print(f"   OK Found matching stub: {found_stub.subject[:50]}...")
     else:
-        print(f"   ✗ No matching stub found")
+        print(f"   ERROR No matching stub found")
     
     # Test fingerprint matching
     print("\n4. Testing fingerprint matching...")
@@ -310,7 +310,7 @@ if __name__ == "__main__":
     found = matcher.find_matching_stub(complete_doc)
     
     if found:
-        print(f"   ✓ Found match: {found.subject[:50]}...")
+        print(f"   OK Found match: {found.subject[:50]}...")
         print(f"   Match method: Story ID")
     
     # Test update registry (without moving - no Outlook connection)
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     success = matcher.update_registry(found)
     
     if success:
-        print(f"   ✓ Updated registry status to 'completed'")
+        print(f"   OK Updated registry status to 'completed'")
         
         # Verify update
         updated_stub = registry.get_stub_by_id(stub_entry.outlook_entry_id)
@@ -334,4 +334,4 @@ if __name__ == "__main__":
     # Cleanup test file
     if test_registry_path.exists():
         test_registry_path.unlink()
-        print("\n✓ Cleaned up test registry file")
+        print("\nOK Cleaned up test registry file")

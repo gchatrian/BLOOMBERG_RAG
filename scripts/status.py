@@ -250,9 +250,9 @@ def print_status(detailed: bool = False) -> None:
         sync_time = datetime.fromisoformat(last_sync['timestamp'])
         print(f"  Date: {sync_time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"  Emails processed:  {last_sync['total_emails_processed']}")
-        print(f"  → Indexed:         {last_sync['complete_indexed']}")
-        print(f"  → Stubs created:   {last_sync['stubs_created']}")
-        print(f"  → Stubs completed: {last_sync['stubs_completed']}")
+        print(f"  to Indexed:         {last_sync['complete_indexed']}")
+        print(f"  to Stubs created:   {last_sync['stubs_created']}")
+        print(f"  to Stubs completed: {last_sync['stubs_completed']}")
         print(f"  Errors:            {last_sync['errors']}")
         print(f"  Duration:          {last_sync['duration_seconds']:.2f}s")
     else:

@@ -17,7 +17,7 @@ class OutlookExtractor:
     - Connect to Outlook via COM
     - Navigate folder structure
     - Extract raw email data
-    - Move emails between folders (source → indexed/stubs/processed)
+    - Move emails between folders (source to indexed/stubs/processed)
     - Skip already processed emails (in subfolders)
     """
     
@@ -55,10 +55,10 @@ class OutlookExtractor:
             self.logger.info("Connecting to Outlook...")
             self.outlook = win32com.client.Dispatch("Outlook.Application")
             self.namespace = self.outlook.GetNamespace("MAPI")
-            self.logger.info("✓ Connected to Outlook successfully")
+            self.logger.info("OK Connected to Outlook successfully")
             return True
         except Exception as e:
-            self.logger.error(f"✗ Failed to connect to Outlook: {e}")
+            self.logger.error(f"ERROR Failed to connect to Outlook: {e}")
             raise Exception(f"Cannot connect to Outlook. Is it installed and running? Error: {e}")
     
     def get_folder(self, folder_path: str) -> Any:
@@ -87,11 +87,11 @@ class OutlookExtractor:
             for folder_name in folder_path.split("/"):
                 current_folder = current_folder.Folders[folder_name]
             
-            self.logger.info(f"✓ Found folder: {folder_path} ({current_folder.Items.Count} items)")
+            self.logger.info(f"OK Found folder: {folder_path} ({current_folder.Items.Count} items)")
             return current_folder
             
         except Exception as e:
-            self.logger.error(f"✗ Folder not found: {folder_path}. Error: {e}")
+            self.logger.error(f"ERROR Folder not found: {folder_path}. Error: {e}")
             raise Exception(f"Folder '{folder_path}' not found. Please check the path. Error: {e}")
     
     def extract_emails(self, max_count: Optional[int] = None, 
@@ -161,11 +161,11 @@ class OutlookExtractor:
                     self.logger.info(f"Reached max count limit: {max_count}")
                     break
             
-            self.logger.info(f"✓ Extracted {len(extracted)} emails from source folder")
+            self.logger.info(f"OK Extracted {len(extracted)} emails from source folder")
             return extracted
             
         except Exception as e:
-            self.logger.error(f"✗ Failed to extract emails: {e}")
+            self.logger.error(f"ERROR Failed to extract emails: {e}")
             raise
     
     def move_email(self, outlook_entry_id: str, target_folder_path: str) -> bool:
@@ -192,11 +192,11 @@ class OutlookExtractor:
             # Move email
             email.Move(target_folder)
             
-            self.logger.debug(f"✓ Moved email '{email.Subject[:30]}...' to {target_folder_path}")
+            self.logger.debug(f"OK Moved email '{email.Subject[:30]}...' to {target_folder_path}")
             return True
             
         except Exception as e:
-            self.logger.error(f"✗ Failed to move email {outlook_entry_id}: {e}")
+            self.logger.error(f"ERROR Failed to move email {outlook_entry_id}: {e}")
             return False
     
     def move_to_indexed(self, outlook_entry_id: str) -> bool:

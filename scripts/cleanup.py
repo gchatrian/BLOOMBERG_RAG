@@ -106,11 +106,11 @@ def delete_old_stubs(
             
             deleted_count += 1
             # FIX: Usa stub.subject invece di stub['subject']
-            print(f"  ✓ Deleted: {stub.subject}")
+            print(f"  OK Deleted: {stub.subject}")
             
         except Exception as e:
             # FIX: Usa stub.subject invece di stub['subject']
-            print(f"  ✗ Failed to delete {stub.subject}: {e}")
+            print(f"  ERROR Failed to delete {stub.subject}: {e}")
     
     print(f"\nDeleted {deleted_count} stubs")
     return deleted_count
@@ -180,10 +180,10 @@ def archive_old_processed(
             outlook_extractor.delete_email(outlook_entry_id)
             
             archived_count += 1
-            print(f"  ✓ Archived: {email['subject']}")
+            print(f"  OK Archived: {email['subject']}")
             
         except Exception as e:
-            print(f"  ✗ Failed to archive {email['subject']}: {e}")
+            print(f"  ERROR Failed to archive {email['subject']}: {e}")
     
     print(f"\nArchived {archived_count} emails")
     return archived_count
@@ -234,10 +234,10 @@ def rebuild_stub_registry(
             )
             
             stub_registry.add_stub(stub_entry)
-            print(f"  ✓ Registered: {stub_email['subject']}")
+            print(f"  OK Registered: {stub_email['subject']}")
             
         except Exception as e:
-            print(f"  ✗ Failed to register {stub_email['subject']}: {e}")
+            print(f"  ERROR Failed to register {stub_email['subject']}: {e}")
     
     # Scan /processed/ folder
     print("\nScanning /processed/ folder...")
@@ -254,10 +254,10 @@ def rebuild_stub_registry(
                 received_time=processed_email['received_time'],
                 status='completed'
             )
-            print(f"  ✓ Registered: {processed_email['subject']}")
+            print(f"  OK Registered: {processed_email['subject']}")
             
         except Exception as e:
-            print(f"  ✗ Failed to register {processed_email['subject']}: {e}")
+            print(f"  ERROR Failed to register {processed_email['subject']}: {e}")
     
     # Save registry
     stub_registry.save()

@@ -134,7 +134,8 @@ class IngestionPipeline:
         """
         try:
             # Extract only from source folder (skip indexed, stubs, processed)
-            emails = self.outlook_extractor.extract_from_source()
+            self.outlook_extractor.connect()
+            emails = self.outlook_extractor.extract_emails()
             return emails
         except Exception as e:
             logger.error(f"Failed to extract emails: {e}", exc_info=True)
@@ -177,17 +178,22 @@ class IngestionPipeline:
             story_id = self.stub_detector.extract_story_id(raw_email)
             fingerprint = self.stub_detector.create_fingerprint(raw_email)
             
-            # Register stub
-            self.stub_registry.register_stub(
+            # Create StubEntry
+            from models import StubEntry
+            stub_entry = StubEntry(
                 outlook_entry_id=outlook_entry_id,
                 story_id=story_id,
                 fingerprint=fingerprint,
                 subject=subject,
-                received_time=raw_email.get('received_time')
+                received_time=raw_email.get('received_time'),
+                status="pending"
             )
             
+            # Register stub using add_stub
+            self.stub_registry.add_stub(stub_entry)
+            
             # Move to /stubs/ folder
-            self.stub_manager.move_to_stubs(outlook_entry_id)
+            self.stub_manager.move_stub_to_folder(outlook_entry_id, self.outlook_extractor)
             
             self.stats.stubs_created += 1
             logger.info(f"Stub registered and moved to /stubs/: {subject}")
@@ -213,10 +219,14 @@ class IngestionPipeline:
             cleaned_content = self.content_cleaner.clean(raw_email.get('body', ''))
             
             # Step 2: Extract metadata
-            metadata = self.metadata_extractor.extract(raw_email, cleaned_content)
+            metadata = self.metadata_extractor.extract(
+                subject=raw_email.get('subject', ''),
+                body=cleaned_content,
+                received_date=raw_email.get('received_date')
+            )
             
             # Step 3: Check for stub match
-            story_id = metadata.get('story_id')
+            story_id = metadata.story_id
             matched_stub = None
             
             if story_id:
@@ -231,16 +241,17 @@ class IngestionPipeline:
             # Step 4: If stub match found, move stub to /processed/
             if matched_stub:
                 logger.info(f"Found matching stub for {subject}, moving stub to /processed/")
-                self.stub_manager.move_to_processed(matched_stub['outlook_entry_id'])
-                self.stub_registry.mark_completed(matched_stub['outlook_entry_id'])
+                self.outlook_extractor.move_to_processed(matched_stub.outlook_entry_id)
+                self.stub_registry.update_status(matched_stub.outlook_entry_id, "completed")
                 self.stats.stubs_completed += 1
             
             # Step 5: Build EmailDocument
             email_document = self.document_builder.build(
-                outlook_entry_id=outlook_entry_id,
-                subject=subject,
-                body=cleaned_content,
-                metadata=metadata
+                raw_email_data=raw_email,
+                cleaned_body=cleaned_content,
+                metadata=metadata,
+                status="complete",
+                is_stub=False
             )
             
             # Step 6: Generate embedding
@@ -270,9 +281,9 @@ class IngestionPipeline:
         logger.info("INGESTION PIPELINE COMPLETED")
         logger.info("="*60)
         logger.info(f"Total emails processed: {self.stats.total_emails_processed}")
-        logger.info(f"Complete emails → /indexed/: {self.stats.complete_indexed}")
-        logger.info(f"New stubs → /stubs/: {self.stats.stubs_created}")
-        logger.info(f"Stubs completed → /processed/: {self.stats.stubs_completed}")
+        logger.info(f"Complete emails to /indexed/: {self.stats.complete_indexed}")
+        logger.info(f"New stubs to /stubs/: {self.stats.stubs_created}")
+        logger.info(f"Stubs completed to /processed/: {self.stats.stubs_completed}")
         logger.info(f"Errors: {self.stats.errors}")
         logger.info(f"Duration: {duration:.2f} seconds")
         logger.info("="*60)

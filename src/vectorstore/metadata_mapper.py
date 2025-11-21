@@ -23,7 +23,7 @@ class MetadataMapper:
     its corresponding EmailDocument. Supports serialization for persistence.
     
     Attributes:
-        id_to_document: Dictionary mapping vector_id (int) → EmailDocument
+        id_to_document: Dictionary mapping vector_id (int) to EmailDocument
     """
     
     def __init__(self):
@@ -142,7 +142,7 @@ class MetadataMapper:
         Get complete mapping dictionary.
         
         Returns:
-            Dictionary of vector_id → EmailDocument
+            Dictionary of vector_id to EmailDocument
             
         Warning:
             Returns reference to internal dict. Do not modify directly.

@@ -107,7 +107,7 @@ class FAISSVectorStore:
             self.index.add(embeddings)
             
             new_size = self.get_index_size()
-            logger.info(f"Added {n_vectors} vectors to index (size: {old_size} → {new_size})")
+            logger.info(f"Added {n_vectors} vectors to index (size: {old_size} to {new_size})")
             
             return n_vectors
             

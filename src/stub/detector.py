@@ -13,7 +13,7 @@ class StubDetector:
     Detects whether a Bloomberg email is a stub or complete article.
     
     Detection criteria (based on real Bloomberg stub structure):
-    1. DEFINITIVE: Presence of "Alert:" AND "Source:" markers → STUB
+    1. DEFINITIVE: Presence of "Alert:" AND "Source:" markers to STUB
     2. Supporting: Content length < 500 chars (excluding metadata)
     3. Supporting: Little/no content before metadata sections
     
@@ -80,7 +80,7 @@ class StubDetector:
         has_markers = self._check_required_markers(raw_body)
         
         if has_markers:
-            self.logger.debug("Stub markers found (Alert: + Source:) → STUB")
+            self.logger.debug("Stub markers found (Alert: + Source:) to STUB")
             return True
         
         # SECONDARY CHECKS (for edge cases)
@@ -93,7 +93,7 @@ class StubDetector:
         
         # Combined decision for edge cases without clear markers
         if is_short and not has_content:
-            self.logger.debug("Short content + no substantial content before metadata → STUB")
+            self.logger.debug("Short content + no substantial content before metadata to STUB")
             return True
         
         # Default: assume complete
@@ -219,7 +219,7 @@ class StubDetector:
         has_source = "source:" in body_lower
         
         if has_alert and has_source:
-            self.logger.debug("✓ Found Alert: AND Source: markers")
+            self.logger.debug("OK Found Alert: AND Source: markers")
             return True
         
         return False

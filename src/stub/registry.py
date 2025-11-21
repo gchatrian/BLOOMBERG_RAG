@@ -151,7 +151,7 @@ class StubRegistry:
     def update_status(self, outlook_entry_id: str, new_status: str, 
                      completed_at: Optional[datetime] = None) -> bool:
         """
-        Update stub status (pending → completed).
+        Update stub status (pending to completed).
         
         Args:
             outlook_entry_id: Unique Outlook identifier
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     # Add stub
     print("\n1. Adding stub to registry...")
     registry.add_stub(stub1)
-    print(f"   ✓ Added: {stub1.subject}")
+    print(f"   OK Added: {stub1.subject}")
     
     # Check statistics
     print("\n2. Registry statistics:")
@@ -326,12 +326,12 @@ if __name__ == "__main__":
     print("\n3. Finding stub by Story ID...")
     found = registry.find_by_story_id("L123ABC456")
     if found:
-        print(f"   ✓ Found: {found.subject}")
+        print(f"   OK Found: {found.subject}")
     
     # Update status
     print("\n4. Updating stub status to 'completed'...")
     registry.update_status("ABC123", "completed")
-    print(f"   ✓ Updated")
+    print(f"   OK Updated")
     
     # Check statistics again
     print("\n5. Registry statistics after completion:")
@@ -347,4 +347,4 @@ if __name__ == "__main__":
     # Cleanup test file
     if test_registry_path.exists():
         test_registry_path.unlink()
-        print("\n✓ Cleaned up test registry file")
+        print("\nOK Cleaned up test registry file")

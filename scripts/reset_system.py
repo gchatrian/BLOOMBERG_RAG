@@ -148,15 +148,15 @@ def delete_files(files: list):
         try:
             if path.is_dir():
                 shutil.rmtree(path)
-                print(f"✓ Deleted {description} (directory)")
+                print(f"OK Deleted {description} (directory)")
             else:
                 path.unlink()
-                print(f"✓ Deleted {description}")
+                print(f"OK Deleted {description}")
             
             deleted_count += 1
             
         except Exception as e:
-            print(f"✗ Failed to delete {description}: {e}")
+            print(f"ERROR Failed to delete {description}: {e}")
             error_count += 1
     
     print()
@@ -190,7 +190,7 @@ def main():
         display_files_to_delete(files)
         
         if not files:
-            print("\n✓ System is already clean")
+            print("\nOK System is already clean")
             return 0
         
         # Confirm (unless --force)
