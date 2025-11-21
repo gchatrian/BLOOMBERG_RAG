@@ -10,7 +10,7 @@ Orchestrates the complete email ingestion workflow:
 """
 
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -160,27 +160,21 @@ class IngestionPipeline:
         
         logger.info(f"Processing email: {subject}")
         
-        # Extract body from raw_email
-        body = raw_email.get('body', '')
-        
-        # Clean body for stub detection
-        cleaned_body = self.content_cleaner.clean(body)
-        
-        # Step 1: Detect if stub or complete (with correct parameters)
-        is_stub = self.stub_detector.is_stub(body, cleaned_body)
+        # CRITICAL FIX #1: Use detect_from_email() instead of is_stub()
+        # The correct method accepts raw_email dict, not separate body and cleaned_body
+        is_stub = self.stub_detector.detect_from_email(raw_email)
         
         if is_stub:
-            self._process_stub(raw_email, cleaned_body)
+            self._process_stub(raw_email)
         else:
-            self._process_complete(raw_email, cleaned_body)
+            self._process_complete(raw_email)
     
-    def _process_stub(self, raw_email: Dict[str, Any], cleaned_body: str) -> None:
+    def _process_stub(self, raw_email: Dict[str, Any]) -> None:
         """
         Process a stub email: register and move to /stubs/.
         
         Args:
             raw_email: Raw stub email dictionary
-            cleaned_body: Cleaned email body
         """
         outlook_entry_id = raw_email.get('outlook_entry_id')
         subject = raw_email.get('subject', 'Unknown')
@@ -189,14 +183,18 @@ class IngestionPipeline:
         logger.info(f"Detected STUB: {subject}")
         
         try:
-            # Extract metadata (signature corretta: subject, body, received_date)
+            # Clean body for metadata extraction
+            body = raw_email.get('body', '')
+            cleaned_body = self.content_cleaner.clean(body)
+            
+            # Extract metadata
             metadata = self.metadata_extractor.extract(
                 subject=subject,
                 body=cleaned_body,
                 received_date=received_time
             )
             
-            story_id = metadata.story_id  # È un BloombergMetadata object
+            story_id = metadata.story_id
             
             # Create fingerprint for matching
             fingerprint = self.stub_registry.create_fingerprint(subject, received_time)
@@ -211,7 +209,7 @@ class IngestionPipeline:
                 status="pending"
             )
             
-            # Register stub using add_stub()
+            # Register stub
             self.stub_registry.add_stub(stub_entry)
             
             # Move to /stubs/ folder
@@ -224,13 +222,12 @@ class IngestionPipeline:
             logger.error(f"Failed to process stub {subject}: {e}", exc_info=True)
             self.stats.errors += 1
     
-    def _process_complete(self, raw_email: Dict[str, Any], cleaned_content: str) -> None:
+    def _process_complete(self, raw_email: Dict[str, Any]) -> None:
         """
         Process a complete email: clean, extract metadata, check stub match, embed, move.
         
         Args:
             raw_email: Raw complete email dictionary
-            cleaned_content: Cleaned content
         """
         outlook_entry_id = raw_email.get('outlook_entry_id')
         subject = raw_email.get('subject', 'Unknown')
@@ -238,42 +235,50 @@ class IngestionPipeline:
         logger.info(f"Detected COMPLETE: {subject}")
         
         try:
-            # Step 1: Extract metadata (signature corretta: subject, body, received_date)
+            # Clean body
+            body = raw_email.get('body', '')
+            cleaned_body = self.content_cleaner.clean(body)
+            
+            # Step 1: Extract metadata
             metadata = self.metadata_extractor.extract(
                 subject=subject,
-                body=cleaned_content,
+                body=cleaned_body,
                 received_date=raw_email.get('received_date')
             )
             
-            # Step 2: Build EmailDocument (signature corretta)
+            # Step 2: Build EmailDocument
             email_document = self.document_builder.build(
                 raw_email_data=raw_email,
-                cleaned_body=cleaned_content,
+                cleaned_body=cleaned_body,
                 metadata=metadata,
                 status="complete",
                 is_stub=False
             )
             
             # Step 3: Check for stub match
-            story_id = metadata.story_id  # È un BloombergMetadata object
+            story_id = metadata.story_id
             matched_stub = None
             
+            # CRITICAL FIX #2: Remove self.stub_registry parameter
+            # The StubMatcher already has registry in __init__
             if story_id:
                 # Try to match by story_id (primary method)
-                matched_stub = self.stub_matcher.match_by_story_id(story_id, self.stub_registry)
+                matched_stub = self.stub_matcher.match_by_story_id(story_id)
             
+            # CRITICAL FIX #3: Remove self.stub_registry parameter
             if not matched_stub:
                 # Fallback: try to match by fingerprint
                 fingerprint = email_document.get_fingerprint()
-                matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint, self.stub_registry)
+                matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint)
             
             # Step 4: If stub match found, complete the stub
             if matched_stub:
                 logger.info(f"Found matching stub for {subject}, completing stub...")
+                # CRITICAL FIX #4: Remove self.stub_registry parameter
+                # complete_stub() only needs stub_entry and outlook_extractor
                 success = self.stub_matcher.complete_stub(
                     matched_stub, 
-                    self.outlook_extractor, 
-                    self.stub_registry
+                    self.outlook_extractor
                 )
                 if success:
                     self.stats.stubs_completed += 1
