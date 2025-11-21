@@ -14,6 +14,12 @@ from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
+# Import required models
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from models import StubEntry
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +103,9 @@ class IngestionPipeline:
         Returns:
             IngestionStats with processing statistics
         """
+        logger.info("="*60)
         logger.info("Starting ingestion pipeline...")
+        logger.info("="*60)
         self.stats = IngestionStats(start_time=datetime.now())
         
         try:
@@ -188,14 +196,18 @@ class IngestionPipeline:
             # Create fingerprint for matching
             fingerprint = self.stub_registry.create_fingerprint(subject, received_time)
             
-            # Register stub
-            self.stub_registry.register_stub(
+            # Create StubEntry
+            stub_entry = StubEntry(
                 outlook_entry_id=outlook_entry_id,
                 story_id=story_id,
                 fingerprint=fingerprint,
                 subject=subject,
-                received_time=received_time
+                received_time=received_time,
+                status="pending"
             )
+            
+            # Register stub using add_stub()
+            self.stub_registry.add_stub(stub_entry)
             
             # Move to /stubs/ folder
             self.outlook_extractor.move_to_stubs(outlook_entry_id)

@@ -1,24 +1,34 @@
+#!/usr/bin/env python3
 """
-Email Sync Script for Bloomberg RAG System.
+Sync Emails Script for Bloomberg RAG System.
 
-Main entry point for syncing Bloomberg emails from Outlook.
-Runs the complete ingestion pipeline.
+This script performs complete email synchronization:
+1. Extracts emails from Outlook source folder
+2. Identifies stubs and complete emails
+3. Moves stubs to /stubs/ folder
+4. Processes complete emails: cleans, extracts metadata, embeds, moves to /indexed/
+5. Matches complete emails with existing stubs and moves matched stubs to /processed/
+6. Generates stub report
+7. Shows final statistics
 
 Usage:
-    python sync_emails.py [--max-emails N] [--verbose]
+    python scripts/sync_emails.py
+    python scripts/sync_emails.py --max-emails 100
+    python scripts/sync_emails.py --verbose
 """
 
 import sys
 import logging
 import argparse
+import json
 from pathlib import Path
 from datetime import datetime
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.append(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import components
+from src.orchestration.ingestion_pipeline import IngestionPipeline
 from src.outlook.extractor import OutlookExtractor
 from src.processing.cleaner import ContentCleaner
 from src.processing.metadata_extractor import MetadataExtractor
@@ -30,7 +40,6 @@ from src.stub.matcher import StubMatcher
 from src.stub.reporter import StubReporter
 from src.embedding.generator import EmbeddingGenerator
 from src.vectorstore.faiss_store import FAISSVectorStore
-from src.orchestration.ingestion_pipeline import IngestionPipeline
 from config.settings import (
     get_outlook_config,
     get_embedding_config,
@@ -39,18 +48,12 @@ from config.settings import (
 )
 
 
-def setup_logging(verbose: bool = False):
-    """
-    Setup logging configuration.
-    
-    Args:
-        verbose: If True, set log level to DEBUG
-    """
-    # Ensure logs directory exists
-    log_dir = PROJECT_ROOT / 'logs'
-    log_dir.mkdir(exist_ok=True)
-    
+def setup_logging(verbose: bool = False) -> None:
+    """Setup logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
+    
+    # Ensure logs directory exists
+    (PROJECT_ROOT / 'logs').mkdir(exist_ok=True)
     
     logging.basicConfig(
         level=level,
@@ -85,27 +88,29 @@ def initialize_components(max_emails: int = None):
     if max_emails:
         outlook_config.max_emails_per_sync = max_emails
     
-    # Initialize components
+    # Initialize OutlookExtractor
     outlook_extractor = OutlookExtractor(
         outlook_config.source_folder,
         outlook_config.indexed_folder,
         outlook_config.stubs_folder,
         outlook_config.processed_folder
     )
+    
+    # CRITICAL: Connect to Outlook
+    try:
+        outlook_extractor.connect()
+    except Exception as e:
+        logger.error(f"Failed to connect to Outlook: {e}")
+        raise
+    
+    # Initialize other components
     content_cleaner = ContentCleaner()
     metadata_extractor = MetadataExtractor()
     document_builder = DocumentBuilder()
-    
-    # CRITICAL: Pass content_cleaner to StubDetector
-    stub_detector = StubDetector(content_cleaner)
-    
+    stub_detector = StubDetector()
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
-    
-    # CRITICAL: Pass stub_registry to StubManager (NOT outlook_extractor)
     stub_manager = StubManager(stub_registry)
-    
-    # StubMatcher takes registry in __init__
-    stub_matcher = StubMatcher(stub_registry)
+    stub_matcher = StubMatcher()
     embedding_generator = EmbeddingGenerator(embedding_config)
     
     # Load or create vector store
@@ -142,105 +147,130 @@ def generate_stub_report(stub_registry: StubRegistry) -> None:
     Args:
         stub_registry: StubRegistry instance
     """
-    reporter = StubReporter()
-    report = reporter.generate_report(stub_registry)
-    print(report)
+    logger = logging.getLogger(__name__)
+    
+    try:
+        reporter = StubReporter()
+        report = reporter.generate_report(stub_registry)
+        
+        print("\n")
+        print(report)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate stub report: {e}", exc_info=True)
+
+
+def save_sync_stats(stats) -> None:
+    """
+    Save sync statistics to last_sync.json.
+    
+    Args:
+        stats: IngestionStats object
+    """
+    persistence_config = get_persistence_config()
+    
+    stats_dict = {
+        "timestamp": datetime.now().isoformat(),
+        "total_emails_processed": stats.total_emails_processed,
+        "complete_indexed": stats.complete_indexed,
+        "stubs_created": stats.stubs_created,
+        "stubs_completed": stats.stubs_completed,
+        "errors": stats.errors,
+        "duration_seconds": stats.duration_seconds()
+    }
+    
+    with open(persistence_config.last_sync_json, 'w') as f:
+        json.dump(stats_dict, f, indent=2)
 
 
 def main():
-    """Main entry point for email sync script."""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Sync Bloomberg emails from Outlook')
-    parser.add_argument('--max-emails', type=int, default=None,
-                       help='Maximum number of emails to process (default: no limit)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                       help='Enable verbose debug logging')
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description='Sync Bloomberg emails from Outlook to vector store'
+    )
+    parser.add_argument(
+        '--max-emails',
+        type=int,
+        default=None,
+        help='Maximum number of emails to process (default: no limit)'
+    )
+    parser.add_argument(
+        '--verbose',
+        '-v',
+        action='store_true',
+        help='Enable verbose logging'
+    )
     
     args = parser.parse_args()
     
     # Setup logging
-    setup_logging(verbose=args.verbose)
+    setup_logging(args.verbose)
     logger = logging.getLogger(__name__)
     
-    # Print header
     print("="*60)
     print("BLOOMBERG RAG - EMAIL SYNC")
     print("="*60)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
+    outlook_extractor = None
+    
     try:
-        # Initialize components
-        print("Initializing components...")
-        (
-            outlook_extractor,
-            content_cleaner,
-            metadata_extractor,
-            document_builder,
-            stub_detector,
-            stub_registry,
-            stub_manager,
-            stub_matcher,
-            embedding_generator,
-            vector_store
-        ) = initialize_components(max_emails=args.max_emails)
-        
-        # Load stub registry
-        stub_registry.load()
+        # Initialize components (includes Outlook connection)
+        components = initialize_components(args.max_emails)
+        outlook_extractor = components[0]  # Keep reference for cleanup
         
         # Create ingestion pipeline
-        pipeline = IngestionPipeline(
-            outlook_extractor=outlook_extractor,
-            content_cleaner=content_cleaner,
-            metadata_extractor=metadata_extractor,
-            document_builder=document_builder,
-            stub_detector=stub_detector,
-            stub_registry=stub_registry,
-            stub_manager=stub_manager,
-            stub_matcher=stub_matcher,
-            embedding_generator=embedding_generator,
-            vector_store=vector_store
-        )
+        pipeline = IngestionPipeline(*components)
         
-        # Run ingestion pipeline
-        print("Starting ingestion pipeline...")
+        # Run pipeline
+        logger.info("Starting ingestion pipeline...")
         stats = pipeline.run()
         
-        # Save vector store
-        print("\nSaving vector store...")
-        vectorstore_config = get_vectorstore_config()
-        vector_store.save(str(vectorstore_config.index_path))
-        
-        # Save stub registry
-        stub_registry.save()
-        
         # Generate stub report
-        print()
+        stub_registry = components[5]  # StubRegistry is at index 5
         generate_stub_report(stub_registry)
         
-        # Final summary
-        print()
-        print("="*60)
+        # Save vector store
+        vector_store = components[9]  # VectorStore is at index 9
+        print("\nSaving vector store...")
+        vector_store.save()
+        
+        # Save stats
+        save_sync_stats(stats)
+        
+        # Print final summary
+        print("\n" + "="*60)
         print("SYNC COMPLETED SUCCESSFULLY")
         print("="*60)
         print(f"Total emails processed: {stats.total_emails_processed}")
-        print(f"Complete emails to /indexed/: {stats.complete_indexed}")
-        print(f"New stubs to /stubs/: {stats.stubs_created}")
-        print(f"Stubs completed to /processed/: {stats.stubs_completed}")
+        print(f"Complete emails → /indexed/: {stats.complete_indexed}")
+        print(f"New stubs → /stubs/: {stats.stubs_created}")
+        print(f"Stubs completed → /processed/: {stats.stubs_completed}")
         print(f"Errors: {stats.errors}")
         print(f"Duration: {stats.duration_seconds():.2f} seconds")
         print("="*60)
         
+        return 0
+        
     except KeyboardInterrupt:
-        print("\n\nSync interrupted by user.")
-        logger.warning("Sync interrupted by user")
-        sys.exit(1)
+        print("\n\nSync interrupted by user")
+        return 1
         
     except Exception as e:
-        print(f"\n\nERROR: {e}")
         logger.error(f"Sync failed: {e}", exc_info=True)
-        sys.exit(1)
+        print(f"\n\nERROR: Sync failed - {e}")
+        return 1
+    
+    finally:
+        # CRITICAL: Always close Outlook connection
+        if outlook_extractor:
+            try:
+                outlook_extractor.close()
+                logger.info("Outlook connection closed")
+            except:
+                pass
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    sys.exit(main())
