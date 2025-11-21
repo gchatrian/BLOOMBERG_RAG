@@ -10,7 +10,7 @@ Orchestrates the complete email ingestion workflow:
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -101,10 +101,6 @@ class IngestionPipeline:
         self.stats = IngestionStats(start_time=datetime.now())
         
         try:
-            # Step 0: Connect to Outlook
-            logger.info("Connecting to Outlook...")
-            self.outlook_extractor.connect()
-            
             # Step 1: Extract emails from source folder
             raw_emails = self._extract_emails()
             self.stats.total_emails_processed = len(raw_emails)
@@ -128,13 +124,6 @@ class IngestionPipeline:
             logger.error(f"Ingestion pipeline failed: {e}", exc_info=True)
             self.stats.end_time = datetime.now()
             raise
-        finally:
-            # Always close Outlook connection
-            try:
-                self.outlook_extractor.close()
-                logger.info("Outlook connection closed")
-            except:
-                pass
     
     def _extract_emails(self) -> List[Dict[str, Any]]:
         """
@@ -145,7 +134,7 @@ class IngestionPipeline:
         """
         try:
             # Extract only from source folder (skip indexed, stubs, processed)
-            emails = self.outlook_extractor.extract_emails()
+            emails = self.outlook_extractor.extract_from_source()
             return emails
         except Exception as e:
             logger.error(f"Failed to extract emails: {e}", exc_info=True)
@@ -163,16 +152,19 @@ class IngestionPipeline:
         
         logger.info(f"Processing email: {subject}")
         
-        # Step 1: Detect if stub or complete
-        is_stub = self.stub_detector.is_stub(
-            body=raw_email.get('body', ''),
-            cleaned_body=self.content_cleaner.clean(raw_email.get('body', ''))
-        )
+        # Extract body from raw_email
+        body = raw_email.get('body', '')
+        
+        # Clean body for stub detection
+        cleaned_body = self.content_cleaner.clean(body)
+        
+        # Step 1: Detect if stub or complete (with correct parameters)
+        is_stub = self.stub_detector.is_stub(body, cleaned_body)
         
         if is_stub:
             self._process_stub(raw_email)
         else:
-            self._process_complete(raw_email)
+            self._process_complete(raw_email, cleaned_body)
     
     def _process_stub(self, raw_email: Dict[str, Any]) -> None:
         """
@@ -210,12 +202,13 @@ class IngestionPipeline:
             logger.error(f"Failed to process stub {subject}: {e}", exc_info=True)
             self.stats.errors += 1
     
-    def _process_complete(self, raw_email: Dict[str, Any]) -> None:
+    def _process_complete(self, raw_email: Dict[str, Any], cleaned_content: str = None) -> None:
         """
         Process a complete email: clean, extract metadata, check stub match, embed, move.
         
         Args:
             raw_email: Raw complete email dictionary
+            cleaned_content: Pre-cleaned content (optional, will clean if not provided)
         """
         outlook_entry_id = raw_email.get('outlook_entry_id')
         subject = raw_email.get('subject', 'Unknown')
@@ -223,18 +216,15 @@ class IngestionPipeline:
         logger.info(f"Detected COMPLETE: {subject}")
         
         try:
-            # Step 1: Clean content
-            cleaned_content = self.content_cleaner.clean(raw_email.get('body', ''))
+            # Step 1: Clean content (if not already cleaned)
+            if cleaned_content is None:
+                cleaned_content = self.content_cleaner.clean(raw_email.get('body', ''))
             
             # Step 2: Extract metadata
-            metadata = self.metadata_extractor.extract(
-                subject=raw_email.get('subject', ''),
-                body=cleaned_content,
-                received_date=raw_email.get('received_date')
-            )
+            metadata = self.metadata_extractor.extract(raw_email, cleaned_content)
             
             # Step 3: Check for stub match
-            story_id = metadata.story_id
+            story_id = metadata.get('story_id')
             matched_stub = None
             
             if story_id:
@@ -255,16 +245,20 @@ class IngestionPipeline:
             
             # Step 5: Build EmailDocument
             email_document = self.document_builder.build(
-                raw_email_data=raw_email,
-                cleaned_body=cleaned_content,
+                outlook_entry_id=outlook_entry_id,
+                subject=subject,
+                body=cleaned_content,
                 metadata=metadata
             )
             
             # Step 6: Generate embedding
-            embedding = self.embedding_generator.generate_single_embedding(email_document.get_full_text())
+            embedding = self.embedding_generator.encode_single(email_document.full_text)
             
             # Step 7: Add to vector store
-            self.vector_store.add_vectors(embedding.reshape(1, -1))
+            self.vector_store.add_document(
+                embedding=embedding,
+                document=email_document
+            )
             
             # Step 8: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)
