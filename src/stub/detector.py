@@ -1,6 +1,6 @@
 """
-Stub detection module for Bloomberg emails.
-Identifies incomplete stub emails vs complete articles.
+Stub detection module for Bloomberg emails - IMPROVED VERSION.
+Identifies incomplete stub emails vs complete articles with better logic.
 """
 
 import re
@@ -12,22 +12,23 @@ class StubDetector:
     """
     Detects whether a Bloomberg email is a stub or complete article.
     
-    Detection criteria (based on real Bloomberg stub structure):
-    1. DEFINITIVE: Presence of "Alert:" AND "Source:" markers → STUB
-    2. Supporting: Content length < 500 chars (excluding metadata)
-    3. Supporting: Little/no content before metadata sections
-    4. Supporting: Bloomberg URL present (but not definitive)
+    IMPROVED Detection criteria:
+    1. Check for "Alert:" AND "Source:" markers
+    2. If markers found, ALSO check content length and position
+    3. Only classify as STUB if markers present AND (content is short OR no substantial content)
+    4. Complete emails may have Alert/Source in signature/footer but have substantial content
     
     Real stub structure:
         Alert:
         SPOTLIGHT NEWS
         Source: BN (Bloomberg News)
-        Tickers
+        Tickers...
+    
+    Real complete structure:
+        [Substantial article content - many paragraphs]
         ...
-        People
-        ...
-        Topics
-        ...
+        Tickers...
+        [May have Alert/Source in footer but irrelevant]
     """
     
     def __init__(self, min_complete_length: int = 500):
@@ -40,8 +41,8 @@ class StubDetector:
         self.min_complete_length = min_complete_length
         self.logger = logging.getLogger(__name__)
         
-        # Required stub markers (BOTH must be present)
-        self.required_stub_markers = ["Alert:", "Source:"]
+        # Stub indicators (not definitive alone)
+        self.stub_markers = ["Alert:", "Source:"]
         
         # Metadata markers (optional sections)
         self.metadata_markers = ["Tickers", "People", "Topics"]
@@ -54,7 +55,7 @@ class StubDetector:
     
     def is_stub(self, body: str, cleaned_body: str) -> bool:
         """
-        Determine if email is a stub.
+        Determine if email is a stub using IMPROVED logic.
         
         Args:
             body: Raw email body (may contain HTML)
@@ -63,34 +64,38 @@ class StubDetector:
         Returns:
             True if stub, False if complete
         """
-        # PRIMARY CHECK: Alert: AND Source: markers
+        # Check all indicators
         has_markers = self.check_required_markers(body)
-        
-        if has_markers:
-            self.logger.debug("Stub markers found (Alert: + Source:) → STUB")
-            return True
-        
-        # SECONDARY CHECKS (for edge cases)
-        
-        # Check content length
         is_short = self.check_content_length(cleaned_body)
-        
-        # Check content before metadata
         has_content = self.check_content_before_metadata(cleaned_body)
         
-        # Combined decision for edge cases without clear markers
+        # IMPROVED LOGIC: Markers alone are NOT definitive
+        if has_markers:
+            # Found Alert+Source markers
+            if is_short or not has_content:
+                # Markers + (short content OR no substantial content) = STUB
+                self.logger.debug("Alert+Source markers + (short OR no content) → STUB")
+                return True
+            else:
+                # Markers present BUT substantial content exists = COMPLETE
+                # (markers might be in footer/signature)
+                self.logger.debug("Alert+Source markers BUT substantial content present → COMPLETE")
+                return False
+        
+        # No markers - use secondary checks
         if is_short and not has_content:
-            self.logger.debug("Short content + no substantial content before metadata → STUB")
+            self.logger.debug("No markers but short content + no substantial content → STUB")
             return True
         
         # Default: assume complete
+        self.logger.debug("No definitive stub indicators → COMPLETE")
         return False
     
     def check_required_markers(self, body: str) -> bool:
         """
-        Check for REQUIRED stub markers: "Alert:" AND "Source:".
+        Check for stub markers: "Alert:" AND "Source:".
         
-        CRITICAL: Both markers MUST be present for definitive stub identification.
+        Note: These are now INDICATORS, not DEFINITIVE markers.
         
         Args:
             body: Email body text
@@ -104,7 +109,7 @@ class StubDetector:
         has_source = "source:" in body_lower
         
         if has_alert and has_source:
-            self.logger.debug("✓ Found Alert: AND Source: markers")
+            self.logger.debug("Found Alert: AND Source: markers (indicator)")
             return True
         
         return False
@@ -175,18 +180,13 @@ class StubDetector:
         # Substantial content = at least 200 characters
         has_content = content_length >= 200
         
-        self.logger.debug(f"Content before metadata: {content_length} chars")
+        self.logger.debug(f"Content before metadata: {content_length} chars (threshold: 200)")
         
         return has_content
     
     def has_bloomberg_url(self, body: str) -> bool:
         """
         Check if body contains Bloomberg article URL.
-        
-        Pattern: bloomberg.com/news/articles/[STORY_ID]
-        
-        Note: Presence of URL does NOT determine stub status definitively.
-              Both stubs and complete emails may contain URLs.
         
         Args:
             body: Email body text
@@ -244,95 +244,3 @@ class StubDetector:
             "has_bloomberg_url": has_url,
             "content_length": len(cleaned_body.strip())
         }
-
-
-# Example usage
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    detector = StubDetector()
-    
-    # Test STUB email (based on real example)
-    stub_email = """
-    External Email
-    
-    Swiss Watch Exports Fell Again in October on US Tariff Hit (1)
-    Alert:
-    SPOTLIGHT NEWS
-    Source: BN (Bloomberg News)
-    Tickers
-    941772Z SW (Audemars Piguet Holding SA)
-    SNBN SW (Schweizerische Nationalbank)
-    People
-    Donald John Trump (United States of America)
-    Georges Kern (Breitling AG)
-    Topics
-    CEO Interviews
-    Luxury Spending
-    Switzerland Economy
-    """
-    
-    print("="*60)
-    print("TEST 1: STUB EMAIL")
-    print("="*60)
-    details = detector.get_detection_details(stub_email, stub_email)
-    print(f"Is Stub: {details['is_stub']}")
-    print(f"Classification: {details['classification']}")
-    print(f"Has Alert+Source: {details['has_required_markers']}")
-    print(f"Is Short: {details['is_short_content']}")
-    print(f"Has Substantial Content: {details['has_substantial_content']}")
-    print(f"Content Length: {details['content_length']} chars")
-    
-    # Test COMPLETE email
-    complete_email = """
-    By John Doe
-    January 15, 2024
-    
-    Swiss watch exports declined for the second consecutive month in October,
-    as US tariffs continued to weigh on the luxury goods sector. Industry
-    leaders expressed concern about the prolonged impact of trade tensions
-    on their businesses.
-    
-    The Federation of the Swiss Watch Industry reported a 5.2% year-over-year
-    decline in exports, with the United States market showing particularly
-    weak performance. This follows a 3.8% drop in September.
-    
-    "The current trade environment presents significant challenges," said
-    Georges Kern, CEO of Breitling AG, in an interview. "We're seeing
-    consumers hesitate on major purchases due to economic uncertainty."
-    
-    Analysts at major banks have revised their forecasts for the sector.
-    Jean-Philippe Bertschy at Vontobel noted that the tariff situation
-    could persist into 2025, potentially affecting annual results.
-    
-    Read more at: https://bloomberg.com/news/articles/ABC123DEF456
-    
-    Tickers:
-    UHR SW (Swatch Group AG/The)
-    CFR SW (Cie Financiere Richemont SA)
-    
-    People:
-    Donald John Trump
-    Georges Kern
-    
-    Topics:
-    Luxury Spending
-    Switzerland Economy
-    Trade
-    """
-    
-    print("\n" + "="*60)
-    print("TEST 2: COMPLETE EMAIL")
-    print("="*60)
-    details = detector.get_detection_details(complete_email, complete_email)
-    print(f"Is Stub: {details['is_stub']}")
-    print(f"Classification: {details['classification']}")
-    print(f"Has Alert+Source: {details['has_required_markers']}")
-    print(f"Is Short: {details['is_short_content']}")
-    print(f"Has Substantial Content: {details['has_substantial_content']}")
-    print(f"Has Bloomberg URL: {details['has_bloomberg_url']}")
-    print(f"Content Length: {details['content_length']} chars")

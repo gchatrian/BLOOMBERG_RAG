@@ -158,7 +158,18 @@ class IngestionPipeline:
         # Step 1: Detect if stub or complete
         body = raw_email.get('body', '')
         cleaned_body = self.content_cleaner.clean(body)
-        is_stub = self.stub_detector.is_stub(body, cleaned_body)
+        
+        # Get detection details for debugging
+        detection_details = self.stub_detector.get_detection_details(body, cleaned_body)
+        
+        logger.debug(f"Detection details for '{subject[:50]}':")
+        logger.debug(f"  - Has Alert+Source markers: {detection_details['has_required_markers']}")
+        logger.debug(f"  - Content length: {detection_details['content_length']} chars")
+        logger.debug(f"  - Is short: {detection_details['is_short_content']}")
+        logger.debug(f"  - Has substantial content: {detection_details['has_substantial_content']}")
+        logger.debug(f"  - Classification: {detection_details['classification']}")
+        
+        is_stub = detection_details['is_stub']
         
         if is_stub:
             self._process_stub(raw_email)
@@ -243,17 +254,14 @@ class IngestionPipeline:
                 self.stats.stubs_completed += 1
                 logger.info(f"Found and completed matching stub for: {subject}")
             
-            # Step 5: Generate embedding
-            embedding = self.embedding_generator.encode_single(email_document.get_full_text())
-            
-            # Step 6: Add to vector store
-            self.vector_store.add_document(embedding, email_document)
-            
-            # Step 7: Move email to /indexed/ folder
+            # Step 5: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)
             
             self.stats.complete_indexed += 1
-            logger.info(f"Complete email indexed and moved to /indexed/: {subject}")
+            logger.info(f"Complete email moved to /indexed/: {subject}")
+            
+            # Note: Email document is created but not added to vector store yet
+            # Vector indexing will be done in a separate step
             
         except Exception as e:
             logger.error(f"Failed to process complete email {subject}: {e}", exc_info=True)
