@@ -96,24 +96,22 @@ def initialize_components(max_emails: int = None):
         outlook_config.processed_folder
     )
     
-    # CRITICAL: Connect to Outlook
-    try:
-        outlook_extractor.connect()
-    except Exception as e:
-        logger.error(f"Failed to connect to Outlook: {e}")
-        raise
-    
-    # Initialize other components
+    # Initialize processing components
     content_cleaner = ContentCleaner()
     metadata_extractor = MetadataExtractor()
     document_builder = DocumentBuilder()
     
-    # StubDetector - NO parameters required (only optional min_complete_length)
-    stub_detector = StubDetector()
+    # CRITICAL FIX: StubDetector requires content_cleaner as first parameter
+    stub_detector = StubDetector(content_cleaner)
     
+    # Initialize stub management components
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
     stub_manager = StubManager(stub_registry)
-    stub_matcher = StubMatcher()
+    
+    # CRITICAL FIX: StubMatcher requires registry parameter
+    stub_matcher = StubMatcher(stub_registry)
+    
+    # Initialize embedding components
     embedding_generator = EmbeddingGenerator(embedding_config)
     
     # Load or create vector store
@@ -219,7 +217,7 @@ def main():
     outlook_extractor = None
     
     try:
-        # Initialize components (includes Outlook connection)
+        # Initialize components
         components = initialize_components(args.max_emails)
         outlook_extractor = components[0]  # Keep reference for cleanup
         
