@@ -1,10 +1,10 @@
 """
-Stub detection module for Bloomberg emails - IMPROVED VERSION.
-Identifies incomplete stub emails vs complete articles with better logic.
+Stub detection module for Bloomberg emails.
+Identifies incomplete stub emails vs complete articles.
 """
 
 import re
-from typing import Tuple
+from typing import Dict, Any, Optional
 import logging
 
 
@@ -12,37 +12,42 @@ class StubDetector:
     """
     Detects whether a Bloomberg email is a stub or complete article.
     
-    IMPROVED Detection criteria:
-    1. Check for "Alert:" AND "Source:" markers
-    2. If markers found, ALSO check content length and position
-    3. Only classify as STUB if markers present AND (content is short OR no substantial content)
-    4. Complete emails may have Alert/Source in signature/footer but have substantial content
+    Detection criteria (based on real Bloomberg stub structure):
+    1. DEFINITIVE: Presence of "Alert:" AND "Source:" markers → STUB
+    2. Supporting: Content length < 500 chars (excluding metadata)
+    3. Supporting: Little/no content before metadata sections
     
     Real stub structure:
         Alert:
         SPOTLIGHT NEWS
         Source: BN (Bloomberg News)
-        Tickers...
-    
-    Real complete structure:
-        [Substantial article content - many paragraphs]
+        Tickers
         ...
-        Tickers...
-        [May have Alert/Source in footer but irrelevant]
+        People
+        ...
+        Topics
+        ...
+    
+    Architecture:
+    - Accepts raw_email dict from Outlook extractor
+    - Uses ContentCleaner dependency for text cleaning
+    - Provides high-level API for email classification
     """
     
-    def __init__(self, min_complete_length: int = 500):
+    def __init__(self, content_cleaner, min_complete_length: int = 500):
         """
         Initialize stub detector.
         
         Args:
+            content_cleaner: ContentCleaner instance for text cleaning
             min_complete_length: Minimum content length for complete email (default: 500 chars)
         """
+        self.content_cleaner = content_cleaner
         self.min_complete_length = min_complete_length
         self.logger = logging.getLogger(__name__)
         
-        # Stub indicators (not definitive alone)
-        self.stub_markers = ["Alert:", "Source:"]
+        # Required stub markers (BOTH must be present)
+        self.required_stub_markers = ["Alert:", "Source:"]
         
         # Metadata markers (optional sections)
         self.metadata_markers = ["Tickers", "People", "Topics"]
@@ -53,49 +58,154 @@ class StubDetector:
             re.IGNORECASE
         )
     
-    def is_stub(self, body: str, cleaned_body: str) -> bool:
+    def detect_from_email(self, raw_email: Dict[str, Any]) -> bool:
         """
-        Determine if email is a stub using IMPROVED logic.
+        Determine if email is a stub.
+        
+        Main entry point for stub detection from raw email dict.
         
         Args:
-            body: Raw email body (may contain HTML)
-            cleaned_body: Cleaned email body text
+            raw_email: Raw email dictionary with 'body' key
             
         Returns:
             True if stub, False if complete
         """
-        # Check all indicators
-        has_markers = self.check_required_markers(body)
-        is_short = self.check_content_length(cleaned_body)
-        has_content = self.check_content_before_metadata(cleaned_body)
+        # Extract raw body
+        raw_body = raw_email.get('body', '')
         
-        # IMPROVED LOGIC: Markers alone are NOT definitive
+        # Clean body
+        cleaned_body = self.content_cleaner.clean(raw_body)
+        
+        # PRIMARY CHECK: Alert: AND Source: markers
+        has_markers = self._check_required_markers(raw_body)
+        
         if has_markers:
-            # Found Alert+Source markers
-            if is_short or not has_content:
-                # Markers + (short content OR no substantial content) = STUB
-                self.logger.debug("Alert+Source markers + (short OR no content) → STUB")
-                return True
-            else:
-                # Markers present BUT substantial content exists = COMPLETE
-                # (markers might be in footer/signature)
-                self.logger.debug("Alert+Source markers BUT substantial content present → COMPLETE")
-                return False
+            self.logger.debug("Stub markers found (Alert: + Source:) → STUB")
+            return True
         
-        # No markers - use secondary checks
+        # SECONDARY CHECKS (for edge cases)
+        
+        # Check content length
+        is_short = self._check_content_length(cleaned_body)
+        
+        # Check content before metadata
+        has_content = self._check_content_before_metadata(cleaned_body)
+        
+        # Combined decision for edge cases without clear markers
         if is_short and not has_content:
-            self.logger.debug("No markers but short content + no substantial content → STUB")
+            self.logger.debug("Short content + no substantial content before metadata → STUB")
             return True
         
         # Default: assume complete
-        self.logger.debug("No definitive stub indicators → COMPLETE")
         return False
     
-    def check_required_markers(self, body: str) -> bool:
+    def classify(self, raw_email: Dict[str, Any]) -> str:
         """
-        Check for stub markers: "Alert:" AND "Source:".
+        Classify email as "complete" or "stub".
         
-        Note: These are now INDICATORS, not DEFINITIVE markers.
+        Args:
+            raw_email: Raw email dictionary
+            
+        Returns:
+            "stub" or "complete"
+        """
+        if self.detect_from_email(raw_email):
+            return "stub"
+        else:
+            return "complete"
+    
+    def extract_story_id(self, raw_email: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract Bloomberg Story ID from email body.
+        
+        Searches for URL pattern: bloomberg.com/news/articles/[STORY_ID]
+        
+        Args:
+            raw_email: Raw email dictionary with 'body' key
+            
+        Returns:
+            Story ID string or None if not found
+        """
+        body = raw_email.get('body', '')
+        
+        match = self.url_pattern.search(body)
+        
+        if match:
+            story_id = match.group(1)
+            self.logger.debug(f"Extracted Story ID: {story_id}")
+            return story_id
+        
+        return None
+    
+    def create_fingerprint(self, raw_email: Dict[str, Any]) -> str:
+        """
+        Create fingerprint for stub matching.
+        
+        Formula: subject.lower().strip() + "_" + date (YYYYMMDD)
+        Used as fallback when Story ID is not available.
+        
+        Args:
+            raw_email: Raw email dictionary with 'subject' and 'received_time'
+            
+        Returns:
+            Fingerprint string
+        """
+        subject = raw_email.get('subject', 'unknown')
+        received_time = raw_email.get('received_time')
+        
+        subject_clean = subject.lower().strip()
+        
+        if received_time:
+            date_str = received_time.strftime("%Y%m%d")
+        else:
+            date_str = "00000000"
+        
+        fingerprint = f"{subject_clean}_{date_str}"
+        
+        self.logger.debug(f"Created fingerprint: {fingerprint[:50]}...")
+        
+        return fingerprint
+    
+    def get_detection_details(self, raw_email: Dict[str, Any]) -> dict:
+        """
+        Get detailed detection information for debugging.
+        
+        Args:
+            raw_email: Raw email dictionary
+            
+        Returns:
+            Dict with detection details
+        """
+        raw_body = raw_email.get('body', '')
+        cleaned_body = self.content_cleaner.clean(raw_body)
+        
+        has_markers = self._check_required_markers(raw_body)
+        is_short = self._check_content_length(cleaned_body)
+        has_content = self._check_content_before_metadata(cleaned_body)
+        has_url = self._has_bloomberg_url(raw_body)
+        is_stub_result = self.detect_from_email(raw_email)
+        
+        return {
+            "is_stub": is_stub_result,
+            "classification": "stub" if is_stub_result else "complete",
+            "has_required_markers": has_markers,
+            "is_short_content": is_short,
+            "has_substantial_content": has_content,
+            "has_bloomberg_url": has_url,
+            "content_length": len(cleaned_body.strip()),
+            "story_id": self.extract_story_id(raw_email),
+            "fingerprint": self.create_fingerprint(raw_email)
+        }
+    
+    # ========================================================================
+    # INTERNAL METHODS (not called externally)
+    # ========================================================================
+    
+    def _check_required_markers(self, body: str) -> bool:
+        """
+        Check for REQUIRED stub markers: "Alert:" AND "Source:".
+        
+        CRITICAL: Both markers MUST be present for definitive stub identification.
         
         Args:
             body: Email body text
@@ -109,12 +219,12 @@ class StubDetector:
         has_source = "source:" in body_lower
         
         if has_alert and has_source:
-            self.logger.debug("Found Alert: AND Source: markers (indicator)")
+            self.logger.debug("✓ Found Alert: AND Source: markers")
             return True
         
         return False
     
-    def check_content_length(self, cleaned_body: str) -> bool:
+    def _check_content_length(self, cleaned_body: str) -> bool:
         """
         Check if content is too short to be a complete article.
         
@@ -131,7 +241,7 @@ class StubDetector:
         
         return is_short
     
-    def check_content_before_metadata(self, cleaned_body: str) -> bool:
+    def _check_content_before_metadata(self, cleaned_body: str) -> bool:
         """
         Check if there is substantial content BEFORE metadata sections.
         
@@ -180,13 +290,18 @@ class StubDetector:
         # Substantial content = at least 200 characters
         has_content = content_length >= 200
         
-        self.logger.debug(f"Content before metadata: {content_length} chars (threshold: 200)")
+        self.logger.debug(f"Content before metadata: {content_length} chars")
         
         return has_content
     
-    def has_bloomberg_url(self, body: str) -> bool:
+    def _has_bloomberg_url(self, body: str) -> bool:
         """
         Check if body contains Bloomberg article URL.
+        
+        Pattern: bloomberg.com/news/articles/[STORY_ID]
+        
+        Note: Presence of URL does NOT determine stub status definitively.
+              Both stubs and complete emails may contain URLs.
         
         Args:
             body: Email body text
@@ -201,46 +316,3 @@ class StubDetector:
             return True
         
         return False
-    
-    def classify(self, body: str, cleaned_body: str) -> str:
-        """
-        Classify email as "complete" or "stub".
-        
-        Args:
-            body: Raw email body
-            cleaned_body: Cleaned email body
-            
-        Returns:
-            "stub" or "complete"
-        """
-        if self.is_stub(body, cleaned_body):
-            return "stub"
-        else:
-            return "complete"
-    
-    def get_detection_details(self, body: str, cleaned_body: str) -> dict:
-        """
-        Get detailed detection information for debugging.
-        
-        Args:
-            body: Raw email body
-            cleaned_body: Cleaned email body
-            
-        Returns:
-            Dict with detection details
-        """
-        has_markers = self.check_required_markers(body)
-        is_short = self.check_content_length(cleaned_body)
-        has_content = self.check_content_before_metadata(cleaned_body)
-        has_url = self.has_bloomberg_url(body)
-        is_stub_result = self.is_stub(body, cleaned_body)
-        
-        return {
-            "is_stub": is_stub_result,
-            "classification": "stub" if is_stub_result else "complete",
-            "has_required_markers": has_markers,
-            "is_short_content": is_short,
-            "has_substantial_content": has_content,
-            "has_bloomberg_url": has_url,
-            "content_length": len(cleaned_body.strip())
-        }

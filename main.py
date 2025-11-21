@@ -7,12 +7,14 @@ Unified command-line interface for all Bloomberg RAG operations:
 - status: Show system status
 - search: Interactive search
 - cleanup: Maintenance operations
+- reset: Reset system to initial state
 
 Usage:
     python main.py sync
     python main.py status --detailed
     python main.py search "Federal Reserve"
     python main.py cleanup --delete-old-stubs 30
+    python main.py reset
 """
 
 import sys
@@ -120,6 +122,16 @@ def cmd_cleanup(args) -> int:
         script_args.append('--dry-run')
     
     return run_script('cleanup.py', script_args)
+
+
+def cmd_reset(args) -> int:
+    """Execute reset command."""
+    script_args = []
+    
+    if args.force:
+        script_args.append('--force')
+    
+    return run_script('reset_system.py', script_args)
 
 
 def main():
@@ -261,6 +273,21 @@ def main():
         help='Show what would be done without doing it'
     )
     cleanup_parser.set_defaults(func=cmd_cleanup)
+    
+    # ========================================================================
+    # RESET COMMAND
+    # ========================================================================
+    reset_parser = subparsers.add_parser(
+        'reset',
+        help='Reset system to initial state',
+        description='Delete all indexed data and reset to empty state (emails in Outlook NOT affected)'
+    )
+    reset_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Skip confirmation prompt'
+    )
+    reset_parser.set_defaults(func=cmd_reset)
     
     # Parse and execute
     args = parser.parse_args()

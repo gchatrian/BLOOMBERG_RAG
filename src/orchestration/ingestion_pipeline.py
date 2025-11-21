@@ -10,7 +10,7 @@ Orchestrates the complete email ingestion workflow:
 """
 
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -133,11 +133,8 @@ class IngestionPipeline:
             List of raw email dictionaries
         """
         try:
-            # Connect to Outlook first
-            self.outlook_extractor.connect()
-            
-            # Extract emails using the correct method name
-            emails = self.outlook_extractor.extract_emails()
+            # Extract only from source folder (skip indexed, stubs, processed)
+            emails = self.outlook_extractor.extract_from_source()
             return emails
         except Exception as e:
             logger.error(f"Failed to extract emails: {e}", exc_info=True)
@@ -156,20 +153,7 @@ class IngestionPipeline:
         logger.info(f"Processing email: {subject}")
         
         # Step 1: Detect if stub or complete
-        body = raw_email.get('body', '')
-        cleaned_body = self.content_cleaner.clean(body)
-        
-        # Get detection details for debugging
-        detection_details = self.stub_detector.get_detection_details(body, cleaned_body)
-        
-        logger.debug(f"Detection details for '{subject[:50]}':")
-        logger.debug(f"  - Has Alert+Source markers: {detection_details['has_required_markers']}")
-        logger.debug(f"  - Content length: {detection_details['content_length']} chars")
-        logger.debug(f"  - Is short: {detection_details['is_short_content']}")
-        logger.debug(f"  - Has substantial content: {detection_details['has_substantial_content']}")
-        logger.debug(f"  - Classification: {detection_details['classification']}")
-        
-        is_stub = detection_details['is_stub']
+        is_stub = self.stub_detector.detect_from_email(raw_email)
         
         if is_stub:
             self._process_stub(raw_email)
@@ -185,30 +169,28 @@ class IngestionPipeline:
         """
         outlook_entry_id = raw_email.get('outlook_entry_id')
         subject = raw_email.get('subject', 'Unknown')
-        body = raw_email.get('body', '')
-        received_date = raw_email.get('received_date')
         
         logger.info(f"Detected STUB: {subject}")
         
         try:
-            # Build EmailDocument for stub
-            metadata = self.metadata_extractor.extract(subject, body, received_date)
-            email_document = self.document_builder.build(
-                raw_email_data=raw_email,
-                cleaned_body=body,
-                metadata=metadata,
-                status="stub",
-                is_stub=True
+            # Extract story ID and create fingerprint using detector
+            story_id = self.stub_detector.extract_story_id(raw_email)
+            fingerprint = self.stub_detector.create_fingerprint(raw_email)
+            
+            # Register stub
+            self.stub_registry.register_stub(
+                outlook_entry_id=outlook_entry_id,
+                story_id=story_id,
+                fingerprint=fingerprint,
+                subject=subject,
+                received_time=raw_email.get('received_time')
             )
             
-            # Process stub (register + move)
-            success = self.stub_manager.process_stub(email_document, self.outlook_extractor)
+            # Move to /stubs/ folder
+            self.stub_manager.move_to_stubs(outlook_entry_id)
             
-            if success:
-                self.stats.stubs_created += 1
-                logger.info(f"Stub registered and moved to /stubs/: {subject}")
-            else:
-                self.stats.errors += 1
+            self.stats.stubs_created += 1
+            logger.info(f"Stub registered and moved to /stubs/: {subject}")
             
         except Exception as e:
             logger.error(f"Failed to process stub {subject}: {e}", exc_info=True)
@@ -223,45 +205,58 @@ class IngestionPipeline:
         """
         outlook_entry_id = raw_email.get('outlook_entry_id')
         subject = raw_email.get('subject', 'Unknown')
-        body = raw_email.get('body', '')
-        received_date = raw_email.get('received_date')
         
         logger.info(f"Detected COMPLETE: {subject}")
         
         try:
             # Step 1: Clean content
-            cleaned_content = self.content_cleaner.clean(body)
+            cleaned_content = self.content_cleaner.clean(raw_email.get('body', ''))
             
             # Step 2: Extract metadata
-            metadata = self.metadata_extractor.extract(subject, cleaned_content, received_date)
+            metadata = self.metadata_extractor.extract(raw_email, cleaned_content)
             
-            # Step 3: Build EmailDocument
-            email_document = self.document_builder.build(
-                raw_email_data=raw_email,
-                cleaned_body=cleaned_content,
-                metadata=metadata,
-                status="complete",
-                is_stub=False
-            )
+            # Step 3: Check for stub match
+            story_id = metadata.get('story_id')
+            matched_stub = None
             
-            # Step 4: Check for stub match
-            match_found, matched_stub = self.stub_matcher.process_complete_email(
-                email_document,
-                self.outlook_extractor
-            )
+            if story_id:
+                # Try to match by story_id (primary method)
+                matched_stub = self.stub_matcher.match_by_story_id(story_id)
             
-            if match_found:
+            if not matched_stub:
+                # Fallback: try to match by fingerprint using detector
+                fingerprint = self.stub_detector.create_fingerprint(raw_email)
+                matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint)
+            
+            # Step 4: If stub match found, move stub to /processed/
+            if matched_stub:
+                logger.info(f"Found matching stub for {subject}, moving stub to /processed/")
+                self.stub_manager.move_to_processed(matched_stub['outlook_entry_id'])
+                self.stub_registry.mark_completed(matched_stub['outlook_entry_id'])
                 self.stats.stubs_completed += 1
-                logger.info(f"Found and completed matching stub for: {subject}")
             
-            # Step 5: Move email to /indexed/ folder
+            # Step 5: Build EmailDocument
+            email_document = self.document_builder.build(
+                outlook_entry_id=outlook_entry_id,
+                subject=subject,
+                body=cleaned_content,
+                metadata=metadata
+            )
+            
+            # Step 6: Generate embedding
+            embedding = self.embedding_generator.encode_single(email_document.full_text)
+            
+            # Step 7: Add to vector store
+            self.vector_store.add_document(
+                embedding=embedding,
+                document=email_document
+            )
+            
+            # Step 8: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)
             
             self.stats.complete_indexed += 1
-            logger.info(f"Complete email moved to /indexed/: {subject}")
-            
-            # Note: Email document is created but not added to vector store yet
-            # Vector indexing will be done in a separate step
+            logger.info(f"Complete email indexed and moved to /indexed/: {subject}")
             
         except Exception as e:
             logger.error(f"Failed to process complete email {subject}: {e}", exc_info=True)
@@ -275,18 +270,9 @@ class IngestionPipeline:
         logger.info("INGESTION PIPELINE COMPLETED")
         logger.info("="*60)
         logger.info(f"Total emails processed: {self.stats.total_emails_processed}")
-        logger.info(f"Complete emails indexed: {self.stats.complete_indexed}")
-        logger.info(f"New stubs created: {self.stats.stubs_created}")
-        logger.info(f"Stubs completed (matched): {self.stats.stubs_completed}")
+        logger.info(f"Complete emails → /indexed/: {self.stats.complete_indexed}")
+        logger.info(f"New stubs → /stubs/: {self.stats.stubs_created}")
+        logger.info(f"Stubs completed → /processed/: {self.stats.stubs_completed}")
         logger.info(f"Errors: {self.stats.errors}")
         logger.info(f"Duration: {duration:.2f} seconds")
         logger.info("="*60)
-    
-    def get_stats(self) -> IngestionStats:
-        """
-        Get current ingestion statistics.
-        
-        Returns:
-            IngestionStats object
-        """
-        return self.stats
