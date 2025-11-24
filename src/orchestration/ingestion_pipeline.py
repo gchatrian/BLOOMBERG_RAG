@@ -81,7 +81,7 @@ class IngestionPipeline:
             stub_manager: StubManager instance
             stub_matcher: StubMatcher instance
             embedding_generator: EmbeddingGenerator instance
-            vector_store: FAISSStore instance
+            vector_store: FAISSVectorStore instance
         """
         self.outlook_extractor = outlook_extractor
         self.content_cleaner = content_cleaner
@@ -160,8 +160,7 @@ class IngestionPipeline:
         
         logger.info(f"Processing email: {subject}")
         
-        # CRITICAL FIX #1: Use detect_from_email() instead of is_stub()
-        # The correct method accepts raw_email dict, not separate body and cleaned_body
+        # Use detect_from_email() method
         is_stub = self.stub_detector.detect_from_email(raw_email)
         
         if is_stub:
@@ -259,13 +258,10 @@ class IngestionPipeline:
             story_id = metadata.story_id
             matched_stub = None
             
-            # CRITICAL FIX #2: Remove self.stub_registry parameter
-            # The StubMatcher already has registry in __init__
             if story_id:
                 # Try to match by story_id (primary method)
                 matched_stub = self.stub_matcher.match_by_story_id(story_id)
             
-            # CRITICAL FIX #3: Remove self.stub_registry parameter
             if not matched_stub:
                 # Fallback: try to match by fingerprint
                 fingerprint = email_document.get_fingerprint()
@@ -274,8 +270,6 @@ class IngestionPipeline:
             # Step 4: If stub match found, complete the stub
             if matched_stub:
                 logger.info(f"Found matching stub for {subject}, completing stub...")
-                # CRITICAL FIX #4: Remove self.stub_registry parameter
-                # complete_stub() only needs stub_entry and outlook_extractor
                 success = self.stub_matcher.complete_stub(
                     matched_stub, 
                     self.outlook_extractor
@@ -283,14 +277,19 @@ class IngestionPipeline:
                 if success:
                     self.stats.stubs_completed += 1
             
-            # Step 5: Generate embedding
-            embedding = self.embedding_generator.encode_single(email_document.full_text)
+            # =============================================================
+            # FIX #1: Use generate_single_embedding() instead of encode_single()
+            # =============================================================
+            embedding = self.embedding_generator.generate_single_embedding(email_document.full_text)
             
-            # Step 6: Add to vector store
-            self.vector_store.add_document(
-                embedding=embedding,
-                document=email_document
-            )
+            # =============================================================
+            # FIX #2: Use add_vectors() instead of add_document()
+            # FAISSVectorStore.add_vectors() expects a numpy array
+            # We need to reshape the single embedding to (1, dim)
+            # =============================================================
+            import numpy as np
+            embedding_2d = embedding.reshape(1, -1)
+            self.vector_store.add_vectors(embedding_2d)
             
             # Step 7: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)
