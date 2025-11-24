@@ -137,7 +137,8 @@ def initialize_components(max_emails: int = None):
         stub_manager,
         stub_matcher,
         embedding_generator,
-        vector_store
+        vector_store,
+        vectorstore_config  # FIX: Return config for save path
     )
 
 
@@ -148,44 +149,37 @@ def generate_stub_report(stub_registry: StubRegistry) -> None:
     Args:
         stub_registry: StubRegistry instance
     """
-    logger = logging.getLogger(__name__)
-    
-    try:
-        reporter = StubReporter()
-        report = reporter.generate_report(stub_registry)
-        
-        print("\n")
-        print(report)
-        
-    except Exception as e:
-        logger.error(f"Failed to generate stub report: {e}", exc_info=True)
+    reporter = StubReporter(stub_registry)
+    report = reporter.generate_report()
+    print(report)
 
 
 def save_sync_stats(stats) -> None:
     """
-    Save sync statistics to last_sync.json.
+    Save sync statistics to JSON file.
     
     Args:
-        stats: IngestionStats object
+        stats: IngestionStats instance
     """
-    persistence_config = get_persistence_config()
+    stats_path = PROJECT_ROOT / 'data' / 'last_sync.json'
+    stats_path.parent.mkdir(exist_ok=True)
     
     stats_dict = {
-        "timestamp": datetime.now().isoformat(),
-        "total_emails_processed": stats.total_emails_processed,
-        "complete_indexed": stats.complete_indexed,
-        "stubs_created": stats.stubs_created,
-        "stubs_completed": stats.stubs_completed,
-        "errors": stats.errors,
-        "duration_seconds": stats.duration_seconds()
+        'timestamp': datetime.now().isoformat(),
+        'total_emails_processed': stats.total_emails_processed,
+        'complete_indexed': stats.complete_indexed,
+        'stubs_created': stats.stubs_created,
+        'stubs_completed': stats.stubs_completed,
+        'errors': stats.errors,
+        'duration_seconds': stats.duration_seconds()
     }
     
-    with open(persistence_config.last_sync_json, 'w') as f:
+    with open(stats_path, 'w') as f:
         json.dump(stats_dict, f, indent=2)
 
 
 def main():
-    """Main entry point."""
+    """Main entry point for email sync."""
     parser = argparse.ArgumentParser(
         description='Sync Bloomberg emails from Outlook to vector store'
     )
@@ -220,9 +214,17 @@ def main():
         # Initialize components
         components = initialize_components(args.max_emails)
         outlook_extractor = components[0]  # Keep reference for cleanup
+        vectorstore_config = components[10]  # FIX: Get config for save path
         
-        # Create ingestion pipeline
-        pipeline = IngestionPipeline(*components)
+        # =============================================================
+        # FIX #1: Connect to Outlook BEFORE running the pipeline
+        # =============================================================
+        logger.info("Connecting to Outlook...")
+        outlook_extractor.connect()
+        logger.info("Outlook connection established")
+        
+        # Create ingestion pipeline (pass only first 10 components)
+        pipeline = IngestionPipeline(*components[:10])
         
         # Run pipeline
         logger.info("Starting ingestion pipeline...")
@@ -232,10 +234,12 @@ def main():
         stub_registry = components[5]  # StubRegistry is at index 5
         generate_stub_report(stub_registry)
         
-        # Save vector store
+        # =============================================================
+        # FIX #2: Pass the path to vector_store.save()
+        # =============================================================
         vector_store = components[9]  # VectorStore is at index 9
         print("\nSaving vector store...")
-        vector_store.save()
+        vector_store.save(str(vectorstore_config.index_path))
         
         # Save stats
         save_sync_stats(stats)
