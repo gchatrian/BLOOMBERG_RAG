@@ -24,13 +24,13 @@ class SearchResult:
     Represents a single search result.
     
     Attributes:
-        document: Full EmailDocument
+        document: Full EmailDocument (or dict from JSON)
         score: Normalized similarity score (0-1, higher is better)
         distance: Raw L2 distance from FAISS
         rank: Position in results (1-indexed)
         metadata_preview: Quick access to key metadata
     """
-    document: EmailDocument
+    document: Any  # EmailDocument or dict
     score: float
     distance: float
     rank: int
@@ -38,12 +38,20 @@ class SearchResult:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (excluding full document for brevity)."""
+        # Handle both EmailDocument and dict
+        if isinstance(self.document, dict):
+            subject = self.document.get('subject', 'Unknown')
+            date = self.document.get('received_date', 'Unknown')
+        else:
+            subject = self.document.subject
+            date = self.document.received_date
+        
         return {
             'rank': self.rank,
             'score': round(self.score, 4),
             'distance': round(self.distance, 4),
-            'subject': self.document.subject,
-            'date': self.document.received_time,
+            'subject': subject,
+            'date': date,
             'metadata': self.metadata_preview
         }
     
@@ -57,20 +65,45 @@ class SearchResult:
         Returns:
             Formatted string with rank, score, subject, date, and preview
         """
+        # Handle both EmailDocument and dict
+        if isinstance(self.document, dict):
+            subject = self.document.get('subject', 'Unknown')
+            body = self.document.get('body', '')
+            bloomberg_metadata = self.document.get('bloomberg_metadata', {})
+            received_date = self.document.get('received_date')
+            
+            # Get article date from bloomberg_metadata
+            if isinstance(bloomberg_metadata, dict):
+                article_date = bloomberg_metadata.get('article_date')
+            else:
+                article_date = None
+        else:
+            subject = self.document.subject
+            body = self.document.body
+            bloomberg_metadata = self.document.bloomberg_metadata
+            received_date = self.document.received_date
+            article_date = bloomberg_metadata.article_date if bloomberg_metadata else None
+        
         # Format date
         date_str = "Unknown"
-        if self.document.metadata and self.document.metadata.article_date:
-            date_str = self.document.metadata.article_date.strftime("%Y-%m-%d")
-        elif self.document.received_time:
-            date_str = self.document.received_time.strftime("%Y-%m-%d")
+        if article_date:
+            if isinstance(article_date, str):
+                date_str = article_date[:10]  # ISO format YYYY-MM-DD
+            else:
+                date_str = article_date.strftime("%Y-%m-%d")
+        elif received_date:
+            if isinstance(received_date, str):
+                date_str = received_date[:10]
+            else:
+                date_str = received_date.strftime("%Y-%m-%d")
         
         # Truncate content
-        content = self.document.body[:content_length]
-        if len(self.document.body) > content_length:
+        content = body[:content_length] if body else ''
+        if len(body) > content_length:
             content += "..."
         
         # Build preview
-        preview = f"[{self.rank}] Score: {self.score:.3f} | {self.document.subject}\n"
+        preview = f"[{self.rank}] Score: {self.score:.3f} | {subject}\n"
         preview += f"    Date: {date_str}\n"
         
         # Add topics if available
@@ -132,10 +165,10 @@ class SemanticRetriever:
             raise RuntimeError("Cannot initialize retriever with empty vector store")
         
         # Check consistency
-        if vector_store.get_index_size() != metadata_mapper.get_size():
+        if vector_store.get_index_size() != metadata_mapper.size():
             logger.warning(
                 f"Size mismatch: vector store has {vector_store.get_index_size()} vectors, "
-                f"metadata mapper has {metadata_mapper.get_size()} documents"
+                f"metadata mapper has {metadata_mapper.size()} documents"
             )
         
         self.embedding_generator = embedding_generator
@@ -150,51 +183,52 @@ class SemanticRetriever:
         """
         Convert L2 distances to normalized similarity scores (0-1).
         
-        Uses inverse normalization: score = 1 / (1 + distance)
-        This ensures:
-        - distance=0 -> score=1.0 (perfect match)
-        - distance=inf -> score=0.0 (no match)
+        Uses formula: score = 1 / (1 + distance)
+        This maps distance 0 -> score 1, and larger distances -> smaller scores.
         
         Args:
             distances: Array of L2 distances from FAISS
             
         Returns:
-            Array of normalized scores (0-1, higher is better)
+            Array of similarity scores in [0, 1]
         """
-        # Inverse normalization
-        scores = 1.0 / (1.0 + distances)
-        
-        logger.debug(
-            f"Normalized distances: "
-            f"min_dist={distances.min():.3f} -> max_score={scores.max():.3f}, "
-            f"max_dist={distances.max():.3f} -> min_score={scores.min():.3f}"
-        )
-        
-        return scores
+        return 1 / (1 + distances)
     
-    def _get_metadata_preview(self, document: EmailDocument) -> Dict[str, Any]:
+    def _get_metadata_preview(self, document: Any) -> Dict[str, Any]:
         """
-        Extract key metadata for quick preview.
+        Extract key metadata from document for quick access.
         
         Args:
-            document: EmailDocument instance
+            document: EmailDocument or dict
             
         Returns:
-            Dictionary with preview metadata (topics, people, author, category)
+            Dictionary with key metadata fields
         """
-        preview = {}
-        
-        if document.metadata:
-            if document.metadata.topics:
-                preview['topics'] = document.metadata.topics
-            if document.metadata.people:
-                preview['people'] = document.metadata.people
-            if document.metadata.author:
-                preview['author'] = document.metadata.author
-            if document.metadata.category:
-                preview['category'] = document.metadata.category
-        
-        return preview
+        # Handle both EmailDocument and dict (from JSON)
+        if isinstance(document, dict):
+            bloomberg_metadata = document.get('bloomberg_metadata', {})
+            if isinstance(bloomberg_metadata, dict):
+                return {
+                    'author': bloomberg_metadata.get('author'),
+                    'category': bloomberg_metadata.get('category'),
+                    'topics': bloomberg_metadata.get('topics', []),
+                    'people': bloomberg_metadata.get('people', []),
+                    'tickers': bloomberg_metadata.get('tickers', []),
+                    'story_id': bloomberg_metadata.get('story_id')
+                }
+            return {}
+        else:
+            # EmailDocument object
+            if document.bloomberg_metadata:
+                return {
+                    'author': document.bloomberg_metadata.author,
+                    'category': document.bloomberg_metadata.category,
+                    'topics': document.bloomberg_metadata.topics or [],
+                    'people': document.bloomberg_metadata.people or [],
+                    'tickers': document.bloomberg_metadata.tickers or [],
+                    'story_id': document.bloomberg_metadata.story_id
+                }
+            return {}
     
     def search(
         self,
@@ -202,31 +236,23 @@ class SemanticRetriever:
         top_k: int = 5
     ) -> List[SearchResult]:
         """
-        Perform semantic search for query.
-        
-        Complete pipeline:
-        1. Generate query embedding
-        2. Search FAISS for top-K nearest neighbors
-        3. Normalize distances to similarity scores
-        4. Retrieve document metadata
-        5. Format as SearchResult objects
+        Perform semantic search.
         
         Args:
             query: Search query string
             top_k: Number of results to return (default: 5)
             
         Returns:
-            List of SearchResult objects, ordered by score (best first)
+            List of SearchResult objects sorted by score (highest first)
             
         Raises:
-            ValueError: If query is empty or top_k is invalid
+            ValueError: If query is empty or top_k <= 0
             RuntimeError: If search fails
             
         Example:
-            >>> retriever = SemanticRetriever(gen, store, mapper)
-            >>> results = retriever.search("tech sector news", top_k=5)
+            >>> results = retriever.search("Federal Reserve interest rates", top_k=10)
             >>> for result in results:
-            ...     print(f"{result.rank}. {result.document.subject} (score: {result.score:.3f})")
+            ...     print(f"{result.document.subject} (score: {result.score:.3f})")
         """
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
@@ -287,12 +313,10 @@ class SemanticRetriever:
             Dictionary with stats:
                 - total_documents: int
                 - embedding_dimension: int
-                - metadata_stats: dict (from MetadataMapper)
         """
         stats = {
             'total_documents': self.vector_store.get_index_size(),
-            'embedding_dimension': self.vector_store.dimension,
-            'metadata_stats': self.metadata_mapper.get_statistics()
+            'embedding_dimension': self.vector_store.dimension
         }
         
         return stats

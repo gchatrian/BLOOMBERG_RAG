@@ -1,19 +1,23 @@
 """
-Configuration settings for Bloomberg RAG system.
-All configurable parameters in one place.
+Configuration settings for Bloomberg RAG System.
+
+Centralized configuration for all components using dataclasses.
 """
 
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, List
 
+
 # ============================================================================
-# PROJECT PATHS
+# BASE PATHS
 # ============================================================================
 
-# Root directory of the project
+# Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# Data directories
 DATA_DIR = PROJECT_ROOT / "data"
 LOGS_DIR = PROJECT_ROOT / "logs"
 
@@ -28,25 +32,19 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 @dataclass
 class OutlookConfig:
-    """Outlook folder paths and settings."""
+    """Outlook email extraction settings."""
     
-    # Main source folder (emails to process)
-    source_folder: str = "Inbox/Bloomberg subs"
+    # Folder paths in Outlook (relative to Inbox or absolute)
+    source_folder: str = "Bloomberg"
+    indexed_folder: str = "Bloomberg/indexed"
+    stubs_folder: str = "Bloomberg/stubs"
+    processed_folder: str = "Bloomberg/processed"
     
-    # Subfolder for indexed/complete emails
-    indexed_folder: str = "Inbox/Bloomberg subs/indexed"
+    # Processing limits
+    max_emails_per_sync: int = 100
     
-    # Subfolder for stub emails (waiting for manual completion)
-    stubs_folder: str = "Inbox/Bloomberg subs/stubs"
-    
-    # Subfolder for processed/completed stub emails (archive)
-    processed_folder: str = "Inbox/Bloomberg subs/processed"
-    
-    # Maximum number of emails to extract per sync (for testing)
-    max_emails_per_sync: Optional[int] = None  # None = no limit
-    
-    # Sort emails by date (newest first)
-    sort_by_date_desc: bool = True
+    # Date filtering (optional)
+    days_back: Optional[int] = None  # None = no limit
 
 
 # ============================================================================
@@ -55,22 +53,19 @@ class OutlookConfig:
 
 @dataclass
 class EmbeddingConfig:
-    """Sentence transformer model settings."""
+    """Embedding model settings."""
     
-    # Model name (English-only for best performance)
-    model_name: str = "all-mpnet-base-v2"
+    # Model name (sentence-transformers)
+    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     
-    # Device to use
-    device: str = "cpu"  # or "cuda" if GPU available
+    # Embedding dimension (must match model output)
+    embedding_dim: int = 384
     
-    # Batch size for encoding
+    # Batch size for embedding generation
     batch_size: int = 32
     
-    # Normalize embeddings (required for FAISS)
-    normalize_embeddings: bool = True
-    
-    # Expected embedding dimension
-    embedding_dim: int = 768  # for all-mpnet-base-v2
+    # Device (cuda, cpu, or auto)
+    device: str = "cpu"
 
 
 # ============================================================================
@@ -86,7 +81,7 @@ class VectorStoreConfig:
     
     # Persistence paths
     index_path: Path = DATA_DIR / "faiss_index.bin"
-    metadata_path: Path = DATA_DIR / "documents_metadata.pkl"
+    metadata_path: Path = DATA_DIR / "documents_metadata.json"
     
     # Search settings
     default_top_k: int = 20

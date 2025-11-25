@@ -81,107 +81,85 @@ class IndexingPipeline:
         
         Args:
             documents: List of EmailDocument instances to index
-            batch_size: Number of documents to process per batch (default: 32)
+            batch_size: Batch size for embedding generation (default: 32)
             show_progress: Whether to show progress bar (default: True)
             
         Returns:
             Dictionary with indexing statistics:
-                - total_documents: Number of documents processed
+                - total: Number of documents processed
                 - successful: Number successfully indexed
-                - failed: Number of failures
-                - processing_time: Total time in seconds
-                - avg_time_per_doc: Average time per document
-                - batch_size: Batch size used
+                - failed: Number that failed
                 - start_vector_id: First vector ID assigned
                 - end_vector_id: Last vector ID assigned
+                - processing_time: Total time in seconds
                 
         Raises:
-            ValueError: If documents list is empty
-            RuntimeError: If indexing fails completely
-            
-        Example:
-            >>> pipeline = IndexingPipeline(gen, store, mapper)
-            >>> docs = [doc1, doc2, doc3]
-            >>> stats = pipeline.index_documents(docs, batch_size=16)
-            >>> print(f"Indexed {stats['successful']} documents")
+            ValueError: If documents is empty
+            RuntimeError: If indexing fails
         """
         if not documents:
-            raise ValueError("Cannot index empty document list")
+            raise ValueError("No documents to index")
         
-        logger.info(f"Starting indexing pipeline for {len(documents)} documents")
         start_time = time.time()
         
-        # Track statistics
+        # Initialize statistics
         stats = {
-            'total_documents': len(documents),
+            'total': len(documents),
             'successful': 0,
             'failed': 0,
-            'processing_time': 0.0,
-            'avg_time_per_doc': 0.0,
-            'batch_size': batch_size,
             'start_vector_id': self.vector_store.get_index_size(),
-            'end_vector_id': None
+            'end_vector_id': None,
+            'processing_time': 0
         }
         
+        logger.info(f"Starting indexing of {len(documents)} documents...")
+        
         try:
-            # Step 1: Extract text for embedding
+            # Step 1: Extract text from documents
             logger.info("Extracting text from documents...")
             texts = []
             valid_documents = []
             
-            for i, doc in enumerate(documents):
-                try:
-                    # FIX: Changed from doc.full_text to doc.get_full_text()
-                    text = doc.get_full_text()
-                    
-                    if not text or not text.strip():
-                        logger.warning(f"Document {i} has empty text, skipping")
-                        stats['failed'] += 1
-                        continue
-                    
+            for doc in documents:
+                text = doc.get_full_text()
+                if text and text.strip():
                     texts.append(text)
                     valid_documents.append(doc)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to extract text from document {i}: {e}")
+                else:
+                    logger.warning(f"Skipping document with empty text: {doc.subject}")
                     stats['failed'] += 1
-                    continue
             
             if not texts:
-                raise RuntimeError("No valid documents to index (all have empty text)")
+                raise ValueError("All documents have empty text")
             
-            logger.info(f"Extracted text from {len(texts)}/{len(documents)} documents")
+            logger.info(f"Extracted text from {len(texts)} documents")
             
             # Step 2: Generate embeddings
-            logger.info(f"Generating embeddings (batch_size={batch_size})...")
-            try:
-                embeddings = self.embedding_generator.generate_embeddings(
-                    texts,
-                    batch_size=batch_size,
-                    show_progress=show_progress
-                )
-                logger.info(f"Generated {len(embeddings)} embeddings")
-            except Exception as e:
-                logger.error(f"Embedding generation failed: {e}")
-                raise RuntimeError(f"Could not generate embeddings: {e}")
+            logger.info("Generating embeddings...")
+            embeddings = self.embedding_generator.generate_embeddings(
+                texts,
+                batch_size=batch_size,
+                show_progress=show_progress
+            )
+            logger.info(f"Generated {len(embeddings)} embeddings")
             
             # Step 3: Add vectors to FAISS
             logger.info("Adding vectors to FAISS index...")
+            start_id = stats['start_vector_id']
             try:
-                start_id = self.vector_store.get_index_size()
-                n_added = self.vector_store.add_vectors(embeddings)
-                logger.info(f"Added {n_added} vectors to index")
+                self.vector_store.add_vectors(embeddings)
+                logger.info(f"Added {len(embeddings)} vectors to index")
             except Exception as e:
                 logger.error(f"Failed to add vectors to FAISS: {e}")
                 raise RuntimeError(f"Could not add vectors to index: {e}")
             
-            # Step 4: Map vector IDs to metadata
+            # Step 4: Map vector IDs to metadata (one by one)
             logger.info("Mapping vector IDs to document metadata...")
             try:
-                n_mapped = self.metadata_mapper.add_documents(
-                    valid_documents,
-                    start_id=start_id
-                )
+                for i, doc in enumerate(valid_documents):
+                    vector_id = start_id + i
+                    self.metadata_mapper.add_document(vector_id, doc)
+                n_mapped = len(valid_documents)
                 logger.info(f"Mapped {n_mapped} documents")
             except Exception as e:
                 logger.error(f"Failed to map metadata: {e}")
@@ -224,7 +202,7 @@ class IndexingPipeline:
             True if index is valid (sizes match), False otherwise
         """
         store_size = self.vector_store.get_index_size()
-        mapper_size = self.metadata_mapper.get_size()
+        mapper_size = self.metadata_mapper.size()
         
         is_valid = (store_size == mapper_size)
         
@@ -249,17 +227,15 @@ class IndexingPipeline:
                 - total_documents: Number of documents in mapper
                 - index_valid: Whether sizes match
                 - embedding_dimension: Vector dimension
-                - document_stats: Statistics from metadata mapper
         """
         store_size = self.vector_store.get_index_size()
-        mapper_size = self.metadata_mapper.get_size()
+        mapper_size = self.metadata_mapper.size()
         
         stats = {
             'total_vectors': store_size,
             'total_documents': mapper_size,
             'index_valid': store_size == mapper_size,
-            'embedding_dimension': self.vector_store.dimension,
-            'document_stats': self.metadata_mapper.get_statistics()
+            'embedding_dimension': self.vector_store.dimension
         }
         
         return stats
@@ -324,7 +300,7 @@ class IndexingPipeline:
         
         # Clear both store and mapper
         old_store_size = self.vector_store.get_index_size()
-        old_mapper_size = self.metadata_mapper.get_size()
+        old_mapper_size = self.metadata_mapper.size()
         
         self.vector_store.reset()
         self.metadata_mapper.clear()
@@ -340,7 +316,7 @@ class IndexingPipeline:
     def __repr__(self) -> str:
         """String representation of the pipeline."""
         store_size = self.vector_store.get_index_size()
-        mapper_size = self.metadata_mapper.get_size()
+        mapper_size = self.metadata_mapper.size()
         return (
             f"IndexingPipeline("
             f"vectors={store_size}, "
