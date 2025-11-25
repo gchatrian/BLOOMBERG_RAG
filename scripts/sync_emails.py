@@ -261,7 +261,7 @@ def main():
 
         # Save metadata mapper
         print("Saving metadata mapper...")
-        metadata_path = vectorstore_config.index_path.parent / "documents_metadata.pkl"
+        metadata_path = vectorstore_config.index_path.parent / "documents_metadata.json"
         metadata_mapper.save(str(metadata_path))
         
         # Save stats

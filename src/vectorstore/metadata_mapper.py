@@ -2,13 +2,12 @@
 Metadata Mapper for FAISS Vector Store.
 
 Maps vector IDs to EmailDocument objects with metadata.
-Handles serialization with proper pywintypes.datetime conversion.
+Uses JSON serialization instead of pickle to avoid pywintypes.datetime issues.
 """
 
-import pickle
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from datetime import datetime
 import logging
 
@@ -21,9 +20,12 @@ class MetadataMapper:
     
     Responsibilities:
     - Store mapping: vector_id → EmailDocument
-    - Serialize/deserialize mapping to disk
-    - Handle pywintypes.datetime conversion for Outlook dates
+    - Serialize/deserialize mapping to disk (JSON format)
+    - Handle datetime conversion for JSON compatibility
     - Provide lookup by vector_id
+    
+    Note: Uses JSON instead of pickle to avoid pywintypes.datetime
+    serialization issues with Outlook COM objects.
     """
     
     def __init__(self):
@@ -74,83 +76,69 @@ class MetadataMapper:
         return len(self.id_to_document)
     
     @staticmethod
-    def _convert_to_standard_datetime(obj):
+    def _serialize_datetime(obj: Any) -> Any:
         """
-        Convert pywintypes.datetime to standard datetime recursively.
+        Convert datetime objects to ISO format strings recursively.
         
         Handles:
+        - datetime.datetime objects
         - pywintypes.datetime objects
         - Dictionaries with datetime values
         - Lists with datetime values
-        - EmailDocument objects
-        - BloombergMetadata objects
         
         Args:
-            obj: Object to convert
+            obj: Object to serialize
             
         Returns:
-            Converted object with standard datetime objects
+            Serialized object with datetime as ISO strings
         """
-        # Handle pywintypes.datetime
-        if type(obj).__name__ == 'datetime' and hasattr(obj, 'timestamp'):
+        # Handle datetime objects (including pywintypes.datetime)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif type(obj).__name__ == 'datetime':  # pywintypes.datetime
             try:
-                # Convert to standard datetime
-                return datetime.fromtimestamp(obj.timestamp())
+                # Try to convert to standard datetime first
+                dt = datetime(
+                    year=obj.year,
+                    month=obj.month,
+                    day=obj.day,
+                    hour=obj.hour,
+                    minute=obj.minute,
+                    second=obj.second
+                )
+                return dt.isoformat()
             except:
-                # Fallback: try to extract components
-                try:
-                    return datetime(
-                        year=obj.year,
-                        month=obj.month,
-                        day=obj.day,
-                        hour=obj.hour,
-                        minute=obj.minute,
-                        second=obj.second
-                    )
-                except:
-                    # Last resort: return current time
-                    return datetime.now()
-        
-        # Handle standard datetime (pass through)
-        elif isinstance(obj, datetime):
-            return obj
-        
-        # Handle EmailDocument objects - convert to dict
-        elif hasattr(obj, '__dict__') and hasattr(obj, 'outlook_entry_id'):
-            # This is an EmailDocument
-            obj_dict = {}
-            for key, value in obj.__dict__.items():
-                obj_dict[key] = MetadataMapper._convert_to_standard_datetime(value)
-            return obj_dict
+                return datetime.now().isoformat()
         
         # Handle dictionaries
         elif isinstance(obj, dict):
-            return {
-                k: MetadataMapper._convert_to_standard_datetime(v) 
-                for k, v in obj.items()
-            }
+            return {k: MetadataMapper._serialize_datetime(v) for k, v in obj.items()}
         
         # Handle lists
         elif isinstance(obj, list):
-            return [MetadataMapper._convert_to_standard_datetime(item) for item in obj]
+            return [MetadataMapper._serialize_datetime(item) for item in obj]
         
-        # Handle tuples
+        # Handle tuples (convert to list for JSON)
         elif isinstance(obj, tuple):
-            return tuple(MetadataMapper._convert_to_standard_datetime(item) for item in obj)
+            return [MetadataMapper._serialize_datetime(item) for item in obj]
         
-        # Other types: pass through
+        # Handle objects with __dict__ (like EmailDocument, BloombergMetadata)
+        elif hasattr(obj, '__dict__'):
+            return MetadataMapper._serialize_datetime(obj.__dict__)
+        
+        # Other types: pass through (will fail if not JSON serializable)
         else:
             return obj
     
     def save(self, path: str) -> None:
         """
-        Save metadata mapper to disk with pywintypes.datetime conversion.
+        Save metadata mapper to disk in JSON format.
         
-        CRITICAL: Converts all pywintypes.datetime objects to standard
-        datetime.datetime before pickling to avoid serialization errors.
+        Uses JSON instead of pickle to avoid pywintypes.datetime issues.
+        All datetime objects are converted to ISO format strings.
         
         Args:
-            path: Path to save pickle file
+            path: Path to save JSON file
             
         Raises:
             RuntimeError: If save fails
@@ -158,23 +146,22 @@ class MetadataMapper:
         try:
             self.logger.info(f"Saving metadata mapper to {path}...")
             
-            # Convert all documents to serializable format
-            # This converts pywintypes.datetime → datetime.datetime
-            converted_mapping = {}
+            # Convert all documents to JSON-serializable format
+            json_mapping = {}
             
             for vector_id, email_doc in self.id_to_document.items():
-                # Convert EmailDocument and all nested objects
-                converted_doc = self._convert_to_standard_datetime(email_doc)
-                converted_mapping[vector_id] = converted_doc
+                # Convert EmailDocument to dict and serialize datetimes
+                doc_dict = self._serialize_datetime(email_doc)
+                json_mapping[str(vector_id)] = doc_dict  # JSON keys must be strings
             
             # Ensure directory exists
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             
-            # Save with pickle
-            with open(path, 'wb') as f:
-                pickle.dump(converted_mapping, f, protocol=pickle.HIGHEST_PROTOCOL)
+            # Save as JSON
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(json_mapping, f, indent=2, ensure_ascii=False)
             
-            self.logger.info(f"Saved metadata mapper: {len(converted_mapping)} documents")
+            self.logger.info(f"Saved metadata mapper: {len(json_mapping)} documents")
             
         except Exception as e:
             self.logger.error(f"Failed to save mapper to {path}: {e}", exc_info=True)
@@ -186,7 +173,7 @@ class MetadataMapper:
         Load metadata mapper from disk.
         
         Args:
-            path: Path to pickle file
+            path: Path to JSON file
             
         Returns:
             MetadataMapper instance
@@ -203,14 +190,18 @@ class MetadataMapper:
         try:
             mapper.logger.info(f"Loading metadata mapper from {path}...")
             
-            with open(path, 'rb') as f:
-                loaded_mapping = pickle.load(f)
+            with open(path, 'r', encoding='utf-8') as f:
+                json_mapping = json.load(f)
             
-            # Loaded data is already in dict format (converted during save)
-            # We can use it directly or reconstruct EmailDocument objects
-            mapper.id_to_document = loaded_mapping
+            # Convert JSON back to internal format
+            # Keys are strings in JSON, convert back to int
+            for vector_id_str, doc_dict in json_mapping.items():
+                vector_id = int(vector_id_str)
+                # Store as dict (we don't need to reconstruct EmailDocument objects
+                # since we just need the data for retrieval)
+                mapper.id_to_document[vector_id] = doc_dict
             
-            mapper.logger.info(f"Loaded metadata mapper: {len(loaded_mapping)} documents")
+            mapper.logger.info(f"Loaded metadata mapper: {len(json_mapping)} documents")
             return mapper
             
         except Exception as e:
