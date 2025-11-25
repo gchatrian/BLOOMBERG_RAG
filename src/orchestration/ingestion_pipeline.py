@@ -10,6 +10,7 @@ Orchestrates the complete email ingestion workflow:
 """
 
 import logging
+import numpy as np
 from typing import List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,7 +65,7 @@ class IngestionPipeline:
         stub_matcher,
         embedding_generator,
         vector_store,
-        metadata_mapper  # ← AGGIUNTO
+        metadata_mapper
     ):
         """
         Initialize ingestion pipeline with all required components.
@@ -79,7 +80,8 @@ class IngestionPipeline:
             stub_manager: StubManager instance
             stub_matcher: StubMatcher instance
             embedding_generator: EmbeddingGenerator instance
-            vector_store: FAISSStore instance
+            vector_store: FAISSVectorStore instance
+            metadata_mapper: MetadataMapper instance
         """
         self.outlook_extractor = outlook_extractor
         self.content_cleaner = content_cleaner
@@ -91,10 +93,10 @@ class IngestionPipeline:
         self.stub_matcher = stub_matcher
         self.embedding_generator = embedding_generator
         self.vector_store = vector_store
-        self.metadata_mapper = metadata_mapper  # ← AGGIUNTO
-
+        self.metadata_mapper = metadata_mapper
+        
         self.stats = IngestionStats()
-            
+    
     def run(self) -> IngestionStats:
         """
         Run the complete ingestion pipeline.
@@ -159,8 +161,7 @@ class IngestionPipeline:
         
         logger.info(f"Processing email: {subject}")
         
-        # CRITICAL FIX #1: Use detect_from_email() instead of is_stub()
-        # The correct method accepts raw_email dict, not separate body and cleaned_body
+        # Use detect_from_email() method
         is_stub = self.stub_detector.detect_from_email(raw_email)
         
         if is_stub:
@@ -212,10 +213,14 @@ class IngestionPipeline:
             self.stub_registry.add_stub(stub_entry)
             
             # Move to /stubs/ folder
-            self.outlook_extractor.move_to_stubs(outlook_entry_id)
+            success, new_entry_id = self.outlook_extractor.move_to_stubs(outlook_entry_id)
             
-            self.stats.stubs_created += 1
-            logger.info(f"Stub registered and moved to /stubs/: {subject}")
+            if success:
+                self.stats.stubs_created += 1
+                logger.info(f"Stub registered and moved to /stubs/: {subject}")
+            else:
+                logger.error(f"Failed to move stub to /stubs/: {subject}")
+                self.stats.errors += 1
             
         except Exception as e:
             logger.error(f"Failed to process stub {subject}: {e}", exc_info=True)
@@ -254,56 +259,81 @@ class IngestionPipeline:
                 is_stub=False
             )
             
-            # Step 3: Check for stub match
+            # =================================================================
+            # Step 3: STUB MATCHING WITH DETAILED LOGGING
+            # =================================================================
             story_id = metadata.story_id
+            fingerprint = email_document.get_fingerprint()
             matched_stub = None
             
-            # CRITICAL FIX #2: Remove self.stub_registry parameter
-            # The StubMatcher already has registry in __init__
-            if story_id:
-                # Try to match by story_id (primary method)
-                matched_stub = self.stub_matcher.match_by_story_id(story_id)
+            logger.info(f"[MATCHING] Complete email story_id: {story_id}")
+            logger.info(f"[MATCHING] Complete email fingerprint: {fingerprint}")
             
-            # CRITICAL FIX #3: Remove self.stub_registry parameter
+            # Try Story ID match first (primary method)
+            if story_id:
+                logger.info(f"[MATCHING] Attempting Story ID match for: {story_id}")
+                matched_stub = self.stub_matcher.match_by_story_id(story_id)
+                
+                if matched_stub:
+                    logger.info(f"[MATCHING] ✓ FOUND MATCH by Story ID!")
+                    logger.info(f"[MATCHING]   Matched stub: {matched_stub.subject}")
+                    logger.info(f"[MATCHING]   Stub EntryID: {matched_stub.outlook_entry_id}")
+                else:
+                    logger.info(f"[MATCHING] ✗ No match found by Story ID")
+            else:
+                logger.info(f"[MATCHING] No Story ID available for complete email")
+            
+            # Fallback to fingerprint match
             if not matched_stub:
-                # Fallback: try to match by fingerprint
-                fingerprint = email_document.get_fingerprint()
+                logger.info(f"[MATCHING] Attempting fingerprint match for: {fingerprint}")
                 matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint)
+                
+                if matched_stub:
+                    logger.info(f"[MATCHING] ✓ FOUND MATCH by fingerprint!")
+                    logger.info(f"[MATCHING]   Matched stub: {matched_stub.subject}")
+                    logger.info(f"[MATCHING]   Stub EntryID: {matched_stub.outlook_entry_id}")
+                else:
+                    logger.info(f"[MATCHING] ✗ No match found by fingerprint")
             
             # Step 4: If stub match found, complete the stub
             if matched_stub:
-                logger.info(f"Found matching stub for {subject}, completing stub...")
-                # CRITICAL FIX #4: Remove self.stub_registry parameter
-                # complete_stub() only needs stub_entry and outlook_extractor
+                logger.info(f"[STUB COMPLETION] Starting completion process...")
+                logger.info(f"[STUB COMPLETION] Stub to complete: {matched_stub.subject}")
+                
                 success = self.stub_matcher.complete_stub(
                     matched_stub, 
                     self.outlook_extractor
                 )
+                
                 if success:
                     self.stats.stubs_completed += 1
+                    logger.info(f"[STUB COMPLETION] ✓ Successfully completed stub!")
+                else:
+                    logger.error(f"[STUB COMPLETION] ✗ Failed to complete stub")
+            else:
+                logger.info(f"[MATCHING] No matching stub found for this complete email")
             
             # Step 5: Generate embedding
-            # Step 5: Generate embedding
-            embedding = self.embedding_generator.generate_single_embedding(email_document.get_full_text())
-
-            # Step 6: Add to vector store and metadata mapper
-            # Get current index size (this will be the vector_id)
-            vector_id = self.vector_store.get_index_size()
-
-            # Reshape embedding to 2D array for FAISS (required format)
+            full_text = email_document.get_full_text()
+            embedding = self.embedding_generator.generate_single_embedding(full_text)
+            
+            # Step 6: Add to vector store
             embedding_2d = embedding.reshape(1, -1)
-
-            # Add vector to FAISS
+            vector_id = self.vector_store.get_index_size()  # Current size = new ID
             self.vector_store.add_vectors(embedding_2d)
-
-            # Map vector_id to document metadata
-            self.metadata_mapper.add_documents([email_document], start_id=vector_id)
             
-            # Step 7: Move email to /indexed/ folder
-            self.outlook_extractor.move_to_indexed(outlook_entry_id)
+            # Step 7: Add to metadata mapper
+            self.metadata_mapper.add_document(vector_id, email_document)
             
-            self.stats.complete_indexed += 1
-            logger.info(f"Complete email indexed and moved to /indexed/: {subject}")
+            # Step 8: Move email to /indexed/ folder
+            success, new_entry_id = self.outlook_extractor.move_to_indexed(outlook_entry_id)
+            
+            if success:
+                self.stats.complete_indexed += 1
+                logger.info(f"Complete email indexed and moved to /indexed/: {subject}")
+            else:
+                logger.error(f"Failed to move complete email to /indexed/: {subject}")
+                self.stats.errors += 1
             
         except Exception as e:
             logger.error(f"Failed to process complete email {subject}: {e}", exc_info=True)

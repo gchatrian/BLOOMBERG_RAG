@@ -5,7 +5,6 @@ Handles stub completion and cleanup via Story ID or fingerprint matching.
 
 from typing import Optional, Tuple
 from datetime import datetime
-from pathlib import Path
 import logging
 
 # Import required modules
@@ -121,14 +120,20 @@ class StubMatcher:
             True if completed successfully, False otherwise
         """
         try:
-            # Step 1: Move stub to /processed/ folder
-            success = self.move_stub_to_processed(stub_entry.outlook_entry_id, outlook_extractor)
+            # =================================================================
+            # FIX: Handle tuple return from move_to_processed()
+            # =================================================================
+            success, new_entry_id = self.move_stub_to_processed(stub_entry.outlook_entry_id, outlook_extractor)
             
             if not success:
                 self.logger.error(f"Failed to move stub to /processed/: {stub_entry.subject[:50]}...")
                 return False
             
-            # Step 2: Update registry status
+            # Log the new EntryID if available
+            if new_entry_id:
+                self.logger.debug(f"Stub moved, new EntryID: {new_entry_id}")
+            
+            # Update registry status
             success = self.update_registry(stub_entry)
             
             if not success:
@@ -139,10 +144,10 @@ class StubMatcher:
             return True
             
         except Exception as e:
-            self.logger.error(f"Error completing stub: {e}")
+            self.logger.error(f"Error completing stub: {e}", exc_info=True)
             return False
     
-    def move_stub_to_processed(self, outlook_entry_id: str, outlook_extractor) -> bool:
+    def move_stub_to_processed(self, outlook_entry_id: str, outlook_extractor) -> Tuple[bool, Optional[str]]:
         """
         Move stub email from /stubs/ to /processed/ folder.
         
@@ -151,21 +156,24 @@ class StubMatcher:
             outlook_extractor: OutlookExtractor instance
             
         Returns:
-            True if moved successfully, False otherwise
+            Tuple of (success: bool, new_entry_id: Optional[str])
         """
         try:
-            success = outlook_extractor.move_to_processed(outlook_entry_id)
+            # =================================================================
+            # FIX: Capture tuple return (success, new_entry_id)
+            # =================================================================
+            success, new_entry_id = outlook_extractor.move_to_processed(outlook_entry_id)
             
             if success:
                 self.logger.debug(f"Moved stub to /processed/ folder: {outlook_entry_id}")
             else:
                 self.logger.error(f"Failed to move stub: {outlook_entry_id}")
             
-            return success
+            return success, new_entry_id
             
         except Exception as e:
             self.logger.error(f"Error moving stub to /processed/: {e}")
-            return False
+            return False, None
     
     def update_registry(self, stub_entry: StubEntry) -> bool:
         """
@@ -192,37 +200,3 @@ class StubMatcher:
         except Exception as e:
             self.logger.error(f"Error updating registry: {e}")
             return False
-    
-    def process_complete_email(self, email_document: EmailDocument, 
-                               outlook_extractor) -> Tuple[bool, Optional[StubEntry]]:
-        """
-        Process complete email: check for matching stub and complete it if found.
-        
-        Complete workflow for processing incoming complete email:
-        1. Find matching stub (by Story ID or fingerprint)
-        2. If match found: complete the stub (move + update registry)
-        3. Return whether match was found and the stub entry
-        
-        Args:
-            email_document: Complete EmailDocument
-            outlook_extractor: OutlookExtractor instance
-            
-        Returns:
-            Tuple of (match_found: bool, stub_entry: Optional[StubEntry])
-        """
-        # Find matching stub
-        stub_entry = self.find_matching_stub(email_document)
-        
-        if not stub_entry:
-            # No matching stub found, nothing to do
-            return False, None
-        
-        # Complete the stub
-        success = self.complete_stub(stub_entry, outlook_extractor)
-        
-        if success:
-            self.logger.info(f"OK Successfully completed stub for: {email_document.subject[:50]}...")
-            return True, stub_entry
-        else:
-            self.logger.error(f"ERROR Failed to complete stub for: {email_document.subject[:50]}...")
-            return False, stub_entry

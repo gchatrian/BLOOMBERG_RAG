@@ -9,6 +9,7 @@ import logging
 import pickle
 from typing import Dict, List, Optional
 from pathlib import Path
+from datetime import datetime
 
 from src.models import EmailDocument
 
@@ -42,11 +43,6 @@ class MetadataMapper:
         Raises:
             ValueError: If vector_id is negative
             TypeError: If email_doc is not an EmailDocument
-            
-        Example:
-            >>> mapper = MetadataMapper()
-            >>> doc = EmailDocument(subject="Test", body="Content", ...)
-            >>> mapper.add_document(0, doc)
         """
         if vector_id < 0:
             raise ValueError(f"Vector ID must be non-negative, got {vector_id}")
@@ -72,11 +68,6 @@ class MetadataMapper:
             
         Returns:
             Number of documents added
-            
-        Example:
-            >>> docs = [doc1, doc2, doc3]
-            >>> mapper.add_documents(docs, start_id=10)
-            3
         """
         for i, doc in enumerate(documents):
             vector_id = start_id + i
@@ -94,11 +85,6 @@ class MetadataMapper:
             
         Returns:
             EmailDocument if found, None otherwise
-            
-        Example:
-            >>> doc = mapper.get_document(5)
-            >>> if doc:
-            ...     print(doc.subject)
         """
         doc = self.id_to_document.get(vector_id)
         
@@ -116,10 +102,6 @@ class MetadataMapper:
             
         Returns:
             List of EmailDocuments (or None for missing IDs), in same order as input
-            
-        Example:
-            >>> docs = mapper.get_documents([0, 5, 10])
-            >>> valid_docs = [d for d in docs if d is not None]
         """
         documents = [self.get_document(vid) for vid in vector_ids]
         
@@ -207,32 +189,93 @@ class MetadataMapper:
         self.id_to_document.clear()
         logger.warning(f"Cleared mapper (removed {old_size} documents)")
     
+    @staticmethod
+    def _convert_pywintypes_datetime(obj):
+        """
+        Convert pywintypes.datetime to standard datetime.datetime recursively.
+        
+        This is needed because pywintypes.datetime from Outlook COM interface
+        cannot be pickled. We need to convert them to standard Python datetime.
+        
+        Args:
+            obj: Object to convert (can be any type)
+            
+        Returns:
+            Converted object with all pywintypes.datetime replaced by datetime.datetime
+        """
+        # Check if it's a pywintypes.datetime
+        if type(obj).__name__ == 'datetime' and hasattr(obj, 'utctimetuple'):
+            # Convert pywintypes.datetime to standard datetime
+            try:
+                # Use the utctimetuple method available in pywintypes.datetime
+                import time
+                timestamp = time.mktime(obj.timetuple())
+                return datetime.fromtimestamp(timestamp)
+            except Exception as e:
+                logger.warning(f"Failed to convert pywintypes.datetime: {e}, using current time")
+                return datetime.now()
+        
+        # Recursively handle common container types
+        elif isinstance(obj, dict):
+            return {k: MetadataMapper._convert_pywintypes_datetime(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [MetadataMapper._convert_pywintypes_datetime(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(MetadataMapper._convert_pywintypes_datetime(item) for item in obj)
+        elif hasattr(obj, '__dict__'):
+            # Handle objects with __dict__ (like dataclasses)
+            for attr_name in dir(obj):
+                if not attr_name.startswith('_'):
+                    try:
+                        attr_value = getattr(obj, attr_name)
+                        if type(attr_value).__name__ == 'datetime':
+                            # Convert and set the attribute
+                            converted = MetadataMapper._convert_pywintypes_datetime(attr_value)
+                            setattr(obj, attr_name, converted)
+                    except (AttributeError, TypeError):
+                        pass
+            return obj
+        else:
+            # Return as-is for primitive types
+            return obj
+    
     def save(self, path: str):
         """
         Save mapper to disk using pickle.
+        
+        Converts all pywintypes.datetime objects to standard datetime.datetime
+        before pickling to avoid serialization errors.
         
         Args:
             path: File path to save mapper (will create parent dirs if needed)
             
         Raises:
             RuntimeError: If save fails
-            
-        Example:
-            >>> mapper.save("data/documents_metadata.pkl")
         """
         try:
             # Ensure parent directory exists
             path_obj = Path(path)
             path_obj.parent.mkdir(parents=True, exist_ok=True)
             
-            # Save with pickle
+            # =================================================================
+            # FIX: Convert all pywintypes.datetime to standard datetime
+            # =================================================================
+            logger.debug("Converting pywintypes.datetime to standard datetime...")
+            converted_mapping = {}
+            
+            for vector_id, email_doc in self.id_to_document.items():
+                # Deep copy and convert the document
+                converted_doc = MetadataMapper._convert_pywintypes_datetime(email_doc)
+                converted_mapping[vector_id] = converted_doc
+            
+            # Save the converted mapping
             with open(path, 'wb') as f:
-                pickle.dump(self.id_to_document, f, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(converted_mapping, f, protocol=pickle.HIGHEST_PROTOCOL)
             
             logger.info(f"Saved metadata mapper to {path} ({self.get_size()} documents)")
             
         except Exception as e:
-            logger.error(f"Failed to save mapper to {path}: {e}")
+            logger.error(f"Failed to save mapper to {path}: {e}", exc_info=True)
             raise RuntimeError(f"Could not save metadata mapper: {e}")
     
     @classmethod
@@ -249,9 +292,6 @@ class MetadataMapper:
         Raises:
             FileNotFoundError: If mapper file doesn't exist
             RuntimeError: If load fails
-            
-        Example:
-            >>> mapper = MetadataMapper.load("data/documents_metadata.pkl")
         """
         path_obj = Path(path)
         
@@ -295,11 +335,11 @@ class MetadataMapper:
         }
         
         for doc in self.id_to_document.values():
-            if doc.metadata and doc.metadata.topics:
+            if doc.bloomberg_metadata and doc.bloomberg_metadata.topics:
                 stats['with_topics'] += 1
-            if doc.metadata and doc.metadata.people:
+            if doc.bloomberg_metadata and doc.bloomberg_metadata.people:
                 stats['with_people'] += 1
-            if doc.metadata and doc.metadata.story_id:
+            if doc.bloomberg_metadata and doc.bloomberg_metadata.story_id:
                 stats['with_story_id'] += 1
             
             # Count by stub status
@@ -316,3 +356,57 @@ class MetadataMapper:
     def __len__(self) -> int:
         """Support len() function."""
         return self.get_size()
+
+
+# Example usage
+if __name__ == "__main__":
+    from src.models import EmailDocument, BloombergMetadata
+    
+    logging.basicConfig(level=logging.DEBUG)
+    
+    print("="*60)
+    print("METADATA MAPPER TEST")
+    print("="*60)
+    
+    # Create mapper
+    mapper = MetadataMapper()
+    
+    # Create sample documents
+    metadata1 = BloombergMetadata(
+        category="BFW",
+        story_id="L123ABC",
+        topics=["AI", "Tech"],
+        people=["Elon Musk"]
+    )
+    
+    doc1 = EmailDocument(
+        outlook_entry_id="ABC123",
+        subject="Test Email 1",
+        body="Content 1",
+        raw_body="Raw 1",
+        sender="test@test.com",
+        received_date=datetime.now(),
+        bloomberg_metadata=metadata1,
+        status="complete",
+        is_stub=False
+    )
+    
+    # Add documents
+    mapper.add_document(0, doc1)
+    
+    print(f"Added {mapper.get_size()} documents")
+    
+    # Save
+    test_path = "test_metadata_mapper.pkl"
+    mapper.save(test_path)
+    print(f"Saved to {test_path}")
+    
+    # Load
+    loaded_mapper = MetadataMapper.load(test_path)
+    print(f"Loaded {loaded_mapper.get_size()} documents")
+    
+    # Cleanup
+    import os
+    if os.path.exists(test_path):
+        os.remove(test_path)
+        print("Cleaned up test file")

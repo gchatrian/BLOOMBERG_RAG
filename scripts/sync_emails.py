@@ -40,7 +40,7 @@ from src.stub.matcher import StubMatcher
 from src.stub.reporter import StubReporter
 from src.embedding.generator import EmbeddingGenerator
 from src.vectorstore.faiss_store import FAISSVectorStore
-from src.vectorstore.metadata_mapper import MetadataMapper  # ← AGGIUNTO
+from src.vectorstore.metadata_mapper import MetadataMapper
 from config.settings import (
     get_outlook_config,
     get_embedding_config,
@@ -102,23 +102,21 @@ def initialize_components(max_emails: int = None):
     metadata_extractor = MetadataExtractor()
     document_builder = DocumentBuilder()
     
-    # CRITICAL FIX: StubDetector requires content_cleaner as first parameter
+    # StubDetector requires content_cleaner as first parameter
     stub_detector = StubDetector(content_cleaner)
     
     # Initialize stub management components
     stub_registry = StubRegistry(persistence_config.stub_registry_json)
     stub_manager = StubManager(stub_registry)
     
-    # CRITICAL FIX: StubMatcher requires registry parameter
+    # StubMatcher requires registry parameter
     stub_matcher = StubMatcher(stub_registry)
     
     # Initialize embedding components
     embedding_generator = EmbeddingGenerator(embedding_config.model_name)
 
     # Initialize metadata mapper
-    metadata_mapper = MetadataMapper()  # ← AGGIUNTO
-
-# Load or create vector store
+    metadata_mapper = MetadataMapper()
     
     # Load or create vector store
     if vectorstore_config.index_path.exists():
@@ -144,20 +142,36 @@ def initialize_components(max_emails: int = None):
         stub_matcher,
         embedding_generator,
         vector_store,
-        metadata_mapper,  # ← AGGIUNTO
-        vectorstore_config  # FIX: Return config for save path
+        metadata_mapper,
+        vectorstore_config
     )
 
 
-def generate_stub_report(stub_registry) -> None:
+def generate_stub_report(stub_registry, stats=None) -> None:
     """
     Generate and display stub report.
     
     Args:
         stub_registry: StubRegistry instance
+        stats: Optional IngestionStats instance
     """
-    reporter = StubReporter(stub_registry)
-    report = reporter.generate_report()
+    # =================================================================
+    # FIX: StubReporter() takes NO arguments in __init__
+    # =================================================================
+    reporter = StubReporter()
+    
+    # Convert stats to dict if provided
+    session_stats = None
+    if stats:
+        session_stats = {
+            'stubs_created': stats.stubs_created,
+            'stubs_completed': stats.stubs_completed
+        }
+    
+    # =================================================================
+    # FIX: Pass registry (and optional session_stats) to generate_report()
+    # =================================================================
+    report = reporter.generate_report(stub_registry, session_stats)
     print(report)
 
 
@@ -221,36 +235,31 @@ def main():
         # Initialize components
         components = initialize_components(args.max_emails)
         outlook_extractor = components[0]  # Keep reference for cleanup
-        vectorstore_config = components[10]  # FIX: Get config for save path
+        stub_registry = components[5]  # StubRegistry
+        vector_store = components[9]  # VectorStore
+        metadata_mapper = components[10]  # MetadataMapper
+        vectorstore_config = components[11]  # Config
         
-        # =============================================================
-        # FIX #1: Connect to Outlook BEFORE running the pipeline
-        # =============================================================
+        # Connect to Outlook BEFORE running the pipeline
         logger.info("Connecting to Outlook...")
         outlook_extractor.connect()
         logger.info("Outlook connection established")
         
-        # Create ingestion pipeline (pass only first 11 components)
+        # Create ingestion pipeline (pass first 11 components)
         pipeline = IngestionPipeline(*components[:11])
         
         # Run pipeline
         logger.info("Starting ingestion pipeline...")
         stats = pipeline.run()
         
-        # Generate stub report
-        stub_registry = components[5]  # StubRegistry is at index 5
-        generate_stub_report(stub_registry)
+        # Generate stub report (with stats)
+        generate_stub_report(stub_registry, stats)
         
-        # =============================================================
-        # FIX #2: Pass the path to vector_store.save()
-        # =============================================================
-        vector_store = components[9]  # VectorStore is at index 9
-        metadata_mapper = components[10]  # MetadataMapper is at index 10
-        vectorstore_config = components[11]  # Config is now at index 11
-
+        # Save vector store
         print("\nSaving vector store...")
         vector_store.save(str(vectorstore_config.index_path))
 
+        # Save metadata mapper
         print("Saving metadata mapper...")
         metadata_path = vectorstore_config.index_path.parent / "documents_metadata.pkl"
         metadata_mapper.save(str(metadata_path))

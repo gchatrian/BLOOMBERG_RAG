@@ -5,15 +5,15 @@ Identifies incomplete stub emails vs complete articles.
 DETECTION LOGIC (based on real Bloomberg email structure):
 
 STUB emails:
-- "Alert:" appears at the BEGINNING (first ~500 chars)
-- No substantial content before Alert/Source
-- Structure: External Email → Alert → Source → Tickers → Topics → footer
+- Alert: and Source: at the beginning
+- NO substantial content between Source: and metadata sections (Tickers/People/Topics)
+- Structure: Alert → Source → Tickers/People/Topics → footer
 
 COMPLETE emails:
-- Substantial article content at the beginning
-- "(Bloomberg) --" pattern indicates article start
-- "Alert:" and "Source:" appear at the END (after article)
-- Structure: Title → Author → Date → Article → Contacts → Alert → Source → Topics → footer
+- Subject line
+- Alert: and Source: (after subject)
+- SUBSTANTIAL ARTICLE CONTENT between Source: and metadata sections
+- Structure: Subject → Alert → Source → ARTICLE CONTENT → People/Topics → footer
 """
 
 import re
@@ -27,10 +27,12 @@ class StubDetector:
     
     Detection strategy:
     1. Check for "(Bloomberg) --" pattern → COMPLETE (definitive)
-    2. Check position of "Alert:" marker:
-       - If in first ~500 chars with no content before → STUB
-       - If after substantial content → COMPLETE
-    3. Fallback: Check content length and structure
+    2. Check for "By [Author]" at beginning → COMPLETE
+    3. Check if Alert: and Source: are early (within 500 chars)
+    4. If Alert/Source are early, check for CONTENT AFTER Source: and BEFORE metadata
+       - If substantial content (>200 chars) → COMPLETE
+       - If no content → STUB
+    5. Fallback: Check content length
     """
     
     def __init__(self, content_cleaner, min_complete_length: int = 500):
@@ -46,7 +48,6 @@ class StubDetector:
         self.logger = logging.getLogger(__name__)
         
         # Pattern that definitively indicates a COMPLETE article
-        # "(Bloomberg) --" is the standard Bloomberg article opening
         self.bloomberg_article_pattern = re.compile(
             r'\(Bloomberg\)\s*--',
             re.IGNORECASE
@@ -81,6 +82,9 @@ class StubDetector:
         
         # Characters to check for "early Alert" detection
         self.early_alert_threshold = 500
+        
+        # Minimum content length to be considered substantial
+        self.min_content_after_source = 200
     
     def detect_from_email(self, raw_email: Dict[str, Any]) -> bool:
         """
@@ -115,38 +119,42 @@ class StubDetector:
             return False  # NOT a stub
         
         # =================================================================
-        # CHECK 3: Position of "Alert:" marker
+        # CHECK 3: Position of "Source:" marker and content after it
         # =================================================================
-        alert_position = self._find_alert_position(body_for_analysis)
+        source_position = self._find_source_position(body_for_analysis)
         
-        if alert_position is not None:
-            # Check if Alert: appears EARLY (within first ~500 chars)
-            if alert_position < self.early_alert_threshold:
-                # Check content BEFORE Alert:
-                content_before_alert = body_for_analysis[:alert_position].strip()
+        if source_position is not None:
+            # Check if Source: appears EARLY (within first ~500 chars)
+            if source_position < self.early_alert_threshold:
+                # Extract content AFTER Source: and BEFORE metadata markers
+                content_after_source = self._extract_content_after_source(body_for_analysis, source_position)
                 
-                # Remove common headers
-                content_before_alert = self._remove_headers(content_before_alert)
+                content_length = len(content_after_source.strip())
                 
-                # If little/no content before Alert: → STUB
-                if len(content_before_alert) < 100:
-                    self.logger.debug(f"Alert: in first {self.early_alert_threshold} chars with minimal content → STUB: {subject[:50]}")
+                if content_length < self.min_content_after_source:
+                    # Little/no content after Source: → STUB
+                    self.logger.debug(
+                        f"Source: early with minimal content after ({content_length} chars) → STUB: {subject[:50]}"
+                    )
                     return True  # IS a stub
                 else:
-                    self.logger.debug(f"Alert: early but has content before ({len(content_before_alert)} chars) → COMPLETE: {subject[:50]}")
+                    # Substantial content after Source: → COMPLETE
+                    self.logger.debug(
+                        f"Source: early but substantial content after ({content_length} chars) → COMPLETE: {subject[:50]}"
+                    )
                     return False  # NOT a stub
             else:
-                # Alert: appears LATE (after substantial content) → COMPLETE
-                self.logger.debug(f"Alert: at position {alert_position} (after content) → COMPLETE: {subject[:50]}")
+                # Source: appears LATE (after substantial content) → COMPLETE
+                self.logger.debug(f"Source: at position {source_position} (after content) → COMPLETE: {subject[:50]}")
                 return False  # NOT a stub
         
         # =================================================================
-        # CHECK 4: No Alert: found - check content length
+        # CHECK 4: No Source: found - check content length
         # =================================================================
         cleaned_body = self.content_cleaner.clean(raw_body)
         
         if len(cleaned_body.strip()) < self.min_complete_length:
-            self.logger.debug(f"No Alert:, short content ({len(cleaned_body)} chars) → STUB: {subject[:50]}")
+            self.logger.debug(f"No Source:, short content ({len(cleaned_body)} chars) → STUB: {subject[:50]}")
             return True  # IS a stub
         
         # =================================================================
@@ -236,7 +244,14 @@ class StubDetector:
         body_for_analysis = self._remove_email_disclaimer(raw_body)
         cleaned_body = self.content_cleaner.clean(raw_body)
         
-        alert_position = self._find_alert_position(body_for_analysis)
+        source_position = self._find_source_position(body_for_analysis)
+        content_after_source = ""
+        content_after_source_length = 0
+        
+        if source_position is not None:
+            content_after_source = self._extract_content_after_source(body_for_analysis, source_position)
+            content_after_source_length = len(content_after_source.strip())
+        
         has_bloomberg_pattern = self._has_bloomberg_article_pattern(body_for_analysis)
         has_author = self._has_author_at_start(body_for_analysis)
         is_stub_result = self.detect_from_email(raw_email)
@@ -246,8 +261,9 @@ class StubDetector:
             "classification": "stub" if is_stub_result else "complete",
             "has_bloomberg_pattern": has_bloomberg_pattern,
             "has_author_at_start": has_author,
-            "alert_position": alert_position,
-            "alert_is_early": alert_position is not None and alert_position < self.early_alert_threshold,
+            "source_position": source_position,
+            "source_is_early": source_position is not None and source_position < self.early_alert_threshold,
+            "content_after_source_length": content_after_source_length,
             "content_length": len(cleaned_body.strip()),
             "story_id": self.extract_story_id(raw_email),
             "fingerprint": self.create_fingerprint(raw_email)
@@ -330,22 +346,67 @@ class StubDetector:
         first_part = body[:500]
         return bool(self.author_pattern.search(first_part))
     
-    def _find_alert_position(self, body: str) -> Optional[int]:
+    def _find_source_position(self, body: str) -> Optional[int]:
         """
-        Find position of "Alert:" marker in body.
+        Find position of "Source:" marker in body.
         
         Args:
             body: Email body text
             
         Returns:
-            Character position of Alert: or None if not found
+            Character position of Source: or None if not found
         """
-        match = self.alert_pattern.search(body)
+        match = self.source_pattern.search(body)
         
         if match:
             return match.start()
         
         return None
+    
+    def _extract_content_after_source(self, body: str, source_position: int) -> str:
+        """
+        Extract content AFTER "Source:" and BEFORE metadata markers.
+        
+        This is the key discriminant:
+        - STUB: No content (goes straight to Tickers/People/Topics)
+        - COMPLETE: Substantial article content
+        
+        Args:
+            body: Email body text
+            source_position: Position where "Source:" starts
+            
+        Returns:
+            Content between Source: and first metadata marker
+        """
+        # Find end of Source: line
+        source_line_end = body.find('\n', source_position)
+        if source_line_end == -1:
+            source_line_end = len(body)
+        
+        # Start extracting from after Source: line
+        content_start = source_line_end + 1
+        
+        # Find first metadata marker
+        earliest_metadata_pos = len(body)
+        
+        for marker in self.metadata_markers + ["Alert", "To suspend", "To modify"]:
+            # Look for marker at start of line
+            pattern = re.compile(
+                r'^\s*' + re.escape(marker) + r'\s*:?\s*$',
+                re.MULTILINE | re.IGNORECASE
+            )
+            match = pattern.search(body, content_start)
+            
+            if match and match.start() < earliest_metadata_pos:
+                earliest_metadata_pos = match.start()
+        
+        # Extract content between Source: and metadata
+        content = body[content_start:earliest_metadata_pos].strip()
+        
+        # Remove common noise
+        content = self._remove_headers(content)
+        
+        return content
     
     def _has_bloomberg_url(self, body: str) -> bool:
         """
@@ -405,6 +466,9 @@ To suspend this alert, click here
 
 Yen Tails Are in Demand While Pound Traders Favor ATM Volatility
 
+Alert: FX OPTIONS COLUMN
+Source: BFW (Bloomberg First Word)
+
 By Vassilis Karamanis
 
 11/24/2025 03:47:54 [BFW]
@@ -418,9 +482,7 @@ position for volatility to continue, with intervention speculation doing the rou
 To contact the reporter on this story:
 Vassilis Karamanis in Athens at vkaramanis1@bloomberg.net
 
-Alert: FX OPTIONS COLUMN
-Source: BFW (Bloomberg First Word)
-
+People
 Topics
 Currencies
 Currency Markets
