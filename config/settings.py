@@ -35,10 +35,10 @@ class OutlookConfig:
     """Outlook email extraction settings."""
     
     # Folder paths in Outlook (relative to Inbox or absolute)
-    source_folder: str = "Bloomberg"
-    indexed_folder: str = "Bloomberg/indexed"
-    stubs_folder: str = "Bloomberg/stubs"
-    processed_folder: str = "Bloomberg/processed"
+    source_folder: str = "Inbox/Bloomberg"
+    indexed_folder: str = "Inbox/Bloomberg/indexed"
+    stubs_folder: str = "Inbox/Bloomberg/stubs"
+    processed_folder: str = "Inbox/Bloomberg/processed"
     
     # Processing limits
     max_emails_per_sync: int = 100
