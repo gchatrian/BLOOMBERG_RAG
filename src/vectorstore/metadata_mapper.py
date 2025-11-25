@@ -1,412 +1,223 @@
 """
-Metadata Mapper for Bloomberg RAG System.
+Metadata Mapper for FAISS Vector Store.
 
-Maintains bidirectional mapping between FAISS vector IDs and EmailDocument metadata.
-Handles serialization and retrieval of document metadata.
+Maps vector IDs to EmailDocument objects with metadata.
+Handles serialization with proper pywintypes.datetime conversion.
 """
 
-import logging
 import pickle
-from typing import Dict, List, Optional
+import json
 from pathlib import Path
+from typing import Dict, Optional
 from datetime import datetime
+import logging
 
 from src.models import EmailDocument
-
-logger = logging.getLogger(__name__)
 
 
 class MetadataMapper:
     """
     Maps FAISS vector IDs to EmailDocument metadata.
     
-    Maintains a dictionary that associates each vector ID (integer) with
-    its corresponding EmailDocument. Supports serialization for persistence.
-    
-    Attributes:
-        id_to_document: Dictionary mapping vector_id (int) to EmailDocument
+    Responsibilities:
+    - Store mapping: vector_id → EmailDocument
+    - Serialize/deserialize mapping to disk
+    - Handle pywintypes.datetime conversion for Outlook dates
+    - Provide lookup by vector_id
     """
     
     def __init__(self):
-        """Initialize empty metadata mapper."""
+        """Initialize metadata mapper."""
         self.id_to_document: Dict[int, EmailDocument] = {}
-        logger.info("MetadataMapper initialized")
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("MetadataMapper initialized")
     
-    def add_document(self, vector_id: int, email_doc: EmailDocument):
+    def add_document(self, vector_id: int, document: EmailDocument) -> None:
         """
         Add document metadata for a vector ID.
         
         Args:
-            vector_id: FAISS vector ID (integer index)
-            email_doc: EmailDocument instance with all metadata
-            
-        Raises:
-            ValueError: If vector_id is negative
-            TypeError: If email_doc is not an EmailDocument
+            vector_id: FAISS vector index
+            document: EmailDocument with metadata
         """
-        if vector_id < 0:
-            raise ValueError(f"Vector ID must be non-negative, got {vector_id}")
-        
-        if not isinstance(email_doc, EmailDocument):
-            raise TypeError(
-                f"email_doc must be EmailDocument, got {type(email_doc)}"
-            )
-        
-        if vector_id in self.id_to_document:
-            logger.warning(f"Overwriting existing document for vector ID {vector_id}")
-        
-        self.id_to_document[vector_id] = email_doc
-        logger.debug(f"Added document for vector ID {vector_id}")
-    
-    def add_documents(self, documents: List[EmailDocument], start_id: int = 0):
-        """
-        Add multiple documents starting from a given ID.
-        
-        Args:
-            documents: List of EmailDocument instances
-            start_id: Starting vector ID (default: 0)
-            
-        Returns:
-            Number of documents added
-        """
-        for i, doc in enumerate(documents):
-            vector_id = start_id + i
-            self.add_document(vector_id, doc)
-        
-        logger.info(f"Added {len(documents)} documents (IDs {start_id}-{start_id + len(documents) - 1})")
-        return len(documents)
+        self.id_to_document[vector_id] = document
+        self.logger.debug(f"Added document metadata for vector_id {vector_id}")
     
     def get_document(self, vector_id: int) -> Optional[EmailDocument]:
         """
-        Retrieve document metadata for a vector ID.
+        Get document metadata by vector ID.
         
         Args:
-            vector_id: FAISS vector ID
+            vector_id: FAISS vector index
             
         Returns:
-            EmailDocument if found, None otherwise
+            EmailDocument or None if not found
         """
-        doc = self.id_to_document.get(vector_id)
-        
-        if doc is None:
-            logger.debug(f"No document found for vector ID {vector_id}")
-        
-        return doc
+        return self.id_to_document.get(vector_id)
     
-    def get_documents(self, vector_ids: List[int]) -> List[Optional[EmailDocument]]:
+    def get_all_documents(self) -> Dict[int, EmailDocument]:
         """
-        Retrieve multiple documents by vector IDs.
-        
-        Args:
-            vector_ids: List of FAISS vector IDs
-            
-        Returns:
-            List of EmailDocuments (or None for missing IDs), in same order as input
-        """
-        documents = [self.get_document(vid) for vid in vector_ids]
-        
-        found = sum(1 for d in documents if d is not None)
-        logger.debug(f"Retrieved {found}/{len(vector_ids)} documents")
-        
-        return documents
-    
-    def get_all_documents(self) -> List[EmailDocument]:
-        """
-        Get all documents in the mapper.
+        Get all document mappings.
         
         Returns:
-            List of all EmailDocument instances (unsorted)
+            Dictionary of vector_id → EmailDocument
         """
-        return list(self.id_to_document.values())
+        return self.id_to_document.copy()
     
-    def get_all_metadata(self) -> Dict[int, EmailDocument]:
-        """
-        Get complete mapping dictionary.
-        
-        Returns:
-            Dictionary of vector_id to EmailDocument
-            
-        Warning:
-            Returns reference to internal dict. Do not modify directly.
-        """
-        return self.id_to_document
-    
-    def has_document(self, vector_id: int) -> bool:
-        """
-        Check if document exists for vector ID.
-        
-        Args:
-            vector_id: FAISS vector ID
-            
-        Returns:
-            True if document exists
-        """
-        return vector_id in self.id_to_document
-    
-    def get_size(self) -> int:
+    def size(self) -> int:
         """
         Get number of documents in mapper.
         
         Returns:
-            Number of mapped documents
+            Count of documents
         """
         return len(self.id_to_document)
     
-    def is_empty(self) -> bool:
-        """
-        Check if mapper is empty.
-        
-        Returns:
-            True if no documents are mapped
-        """
-        return len(self.id_to_document) == 0
-    
-    def remove_document(self, vector_id: int) -> bool:
-        """
-        Remove document from mapper.
-        
-        Args:
-            vector_id: FAISS vector ID to remove
-            
-        Returns:
-            True if document was removed, False if not found
-        """
-        if vector_id in self.id_to_document:
-            del self.id_to_document[vector_id]
-            logger.debug(f"Removed document for vector ID {vector_id}")
-            return True
-        else:
-            logger.debug(f"No document to remove for vector ID {vector_id}")
-            return False
-    
-    def clear(self):
-        """
-        Remove all documents from mapper.
-        
-        Warning: This will delete all mappings!
-        """
-        old_size = self.get_size()
-        self.id_to_document.clear()
-        logger.warning(f"Cleared mapper (removed {old_size} documents)")
-    
     @staticmethod
-    def _convert_pywintypes_datetime(obj):
+    def _convert_to_standard_datetime(obj):
         """
-        Convert pywintypes.datetime to standard datetime.datetime recursively.
+        Convert pywintypes.datetime to standard datetime recursively.
         
-        This is needed because pywintypes.datetime from Outlook COM interface
-        cannot be pickled. We need to convert them to standard Python datetime.
+        Handles:
+        - pywintypes.datetime objects
+        - Dictionaries with datetime values
+        - Lists with datetime values
+        - EmailDocument objects
+        - BloombergMetadata objects
         
         Args:
-            obj: Object to convert (can be any type)
+            obj: Object to convert
             
         Returns:
-            Converted object with all pywintypes.datetime replaced by datetime.datetime
+            Converted object with standard datetime objects
         """
-        # Check if it's a pywintypes.datetime
-        if type(obj).__name__ == 'datetime' and hasattr(obj, 'utctimetuple'):
-            # Convert pywintypes.datetime to standard datetime
+        # Handle pywintypes.datetime
+        if type(obj).__name__ == 'datetime' and hasattr(obj, 'timestamp'):
             try:
-                # Use the utctimetuple method available in pywintypes.datetime
-                import time
-                timestamp = time.mktime(obj.timetuple())
-                return datetime.fromtimestamp(timestamp)
-            except Exception as e:
-                logger.warning(f"Failed to convert pywintypes.datetime: {e}, using current time")
-                return datetime.now()
+                # Convert to standard datetime
+                return datetime.fromtimestamp(obj.timestamp())
+            except:
+                # Fallback: try to extract components
+                try:
+                    return datetime(
+                        year=obj.year,
+                        month=obj.month,
+                        day=obj.day,
+                        hour=obj.hour,
+                        minute=obj.minute,
+                        second=obj.second
+                    )
+                except:
+                    # Last resort: return current time
+                    return datetime.now()
         
-        # Recursively handle common container types
-        elif isinstance(obj, dict):
-            return {k: MetadataMapper._convert_pywintypes_datetime(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [MetadataMapper._convert_pywintypes_datetime(item) for item in obj]
-        elif isinstance(obj, tuple):
-            return tuple(MetadataMapper._convert_pywintypes_datetime(item) for item in obj)
-        elif hasattr(obj, '__dict__'):
-            # Handle objects with __dict__ (like dataclasses)
-            for attr_name in dir(obj):
-                if not attr_name.startswith('_'):
-                    try:
-                        attr_value = getattr(obj, attr_name)
-                        if type(attr_value).__name__ == 'datetime':
-                            # Convert and set the attribute
-                            converted = MetadataMapper._convert_pywintypes_datetime(attr_value)
-                            setattr(obj, attr_name, converted)
-                    except (AttributeError, TypeError):
-                        pass
+        # Handle standard datetime (pass through)
+        elif isinstance(obj, datetime):
             return obj
+        
+        # Handle EmailDocument objects - convert to dict
+        elif hasattr(obj, '__dict__') and hasattr(obj, 'outlook_entry_id'):
+            # This is an EmailDocument
+            obj_dict = {}
+            for key, value in obj.__dict__.items():
+                obj_dict[key] = MetadataMapper._convert_to_standard_datetime(value)
+            return obj_dict
+        
+        # Handle dictionaries
+        elif isinstance(obj, dict):
+            return {
+                k: MetadataMapper._convert_to_standard_datetime(v) 
+                for k, v in obj.items()
+            }
+        
+        # Handle lists
+        elif isinstance(obj, list):
+            return [MetadataMapper._convert_to_standard_datetime(item) for item in obj]
+        
+        # Handle tuples
+        elif isinstance(obj, tuple):
+            return tuple(MetadataMapper._convert_to_standard_datetime(item) for item in obj)
+        
+        # Other types: pass through
         else:
-            # Return as-is for primitive types
             return obj
     
-    def save(self, path: str):
+    def save(self, path: str) -> None:
         """
-        Save mapper to disk using pickle.
+        Save metadata mapper to disk with pywintypes.datetime conversion.
         
-        Converts all pywintypes.datetime objects to standard datetime.datetime
-        before pickling to avoid serialization errors.
+        CRITICAL: Converts all pywintypes.datetime objects to standard
+        datetime.datetime before pickling to avoid serialization errors.
         
         Args:
-            path: File path to save mapper (will create parent dirs if needed)
+            path: Path to save pickle file
             
         Raises:
             RuntimeError: If save fails
         """
         try:
-            # Ensure parent directory exists
-            path_obj = Path(path)
-            path_obj.parent.mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"Saving metadata mapper to {path}...")
             
-            # =================================================================
-            # FIX: Convert all pywintypes.datetime to standard datetime
-            # =================================================================
-            logger.debug("Converting pywintypes.datetime to standard datetime...")
+            # Convert all documents to serializable format
+            # This converts pywintypes.datetime → datetime.datetime
             converted_mapping = {}
             
             for vector_id, email_doc in self.id_to_document.items():
-                # Deep copy and convert the document
-                converted_doc = MetadataMapper._convert_pywintypes_datetime(email_doc)
+                # Convert EmailDocument and all nested objects
+                converted_doc = self._convert_to_standard_datetime(email_doc)
                 converted_mapping[vector_id] = converted_doc
             
-            # Save the converted mapping
+            # Ensure directory exists
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save with pickle
             with open(path, 'wb') as f:
                 pickle.dump(converted_mapping, f, protocol=pickle.HIGHEST_PROTOCOL)
             
-            logger.info(f"Saved metadata mapper to {path} ({self.get_size()} documents)")
+            self.logger.info(f"Saved metadata mapper: {len(converted_mapping)} documents")
             
         except Exception as e:
-            logger.error(f"Failed to save mapper to {path}: {e}", exc_info=True)
+            self.logger.error(f"Failed to save mapper to {path}: {e}", exc_info=True)
             raise RuntimeError(f"Could not save metadata mapper: {e}")
     
     @classmethod
     def load(cls, path: str) -> 'MetadataMapper':
         """
-        Load mapper from disk.
+        Load metadata mapper from disk.
         
         Args:
-            path: File path to load mapper from
+            path: Path to pickle file
             
         Returns:
-            Loaded MetadataMapper instance
+            MetadataMapper instance
             
         Raises:
-            FileNotFoundError: If mapper file doesn't exist
+            FileNotFoundError: If file doesn't exist
             RuntimeError: If load fails
         """
-        path_obj = Path(path)
+        mapper = cls()
         
-        if not path_obj.exists():
-            raise FileNotFoundError(f"Mapper file not found: {path}")
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Metadata mapper file not found: {path}")
         
         try:
-            # Load with pickle
+            mapper.logger.info(f"Loading metadata mapper from {path}...")
+            
             with open(path, 'rb') as f:
-                id_to_document = pickle.load(f)
+                loaded_mapping = pickle.load(f)
             
-            # Validate loaded data
-            if not isinstance(id_to_document, dict):
-                raise ValueError(f"Loaded data is not a dict: {type(id_to_document)}")
+            # Loaded data is already in dict format (converted during save)
+            # We can use it directly or reconstruct EmailDocument objects
+            mapper.id_to_document = loaded_mapping
             
-            # Create instance and assign loaded mapping
-            mapper = cls()
-            mapper.id_to_document = id_to_document
-            
-            logger.info(f"Loaded metadata mapper from {path} ({mapper.get_size()} documents)")
-            
+            mapper.logger.info(f"Loaded metadata mapper: {len(loaded_mapping)} documents")
             return mapper
             
         except Exception as e:
-            logger.error(f"Failed to load mapper from {path}: {e}")
+            mapper.logger.error(f"Failed to load mapper from {path}: {e}")
             raise RuntimeError(f"Could not load metadata mapper: {e}")
     
-    def get_statistics(self) -> Dict[str, int]:
-        """
-        Get statistics about mapped documents.
-        
-        Returns:
-            Dictionary with stats (total_docs, with_topics, with_people, etc.)
-        """
-        stats = {
-            'total_docs': self.get_size(),
-            'with_topics': 0,
-            'with_people': 0,
-            'with_story_id': 0,
-            'stub_status': {}
-        }
-        
-        for doc in self.id_to_document.values():
-            if doc.bloomberg_metadata and doc.bloomberg_metadata.topics:
-                stats['with_topics'] += 1
-            if doc.bloomberg_metadata and doc.bloomberg_metadata.people:
-                stats['with_people'] += 1
-            if doc.bloomberg_metadata and doc.bloomberg_metadata.story_id:
-                stats['with_story_id'] += 1
-            
-            # Count by stub status
-            status = doc.status or 'unknown'
-            stats['stub_status'][status] = stats['stub_status'].get(status, 0) + 1
-        
-        return stats
-    
-    def __repr__(self) -> str:
-        """String representation of the mapper."""
-        size = self.get_size()
-        return f"MetadataMapper(size={size})"
-    
-    def __len__(self) -> int:
-        """Support len() function."""
-        return self.get_size()
-
-
-# Example usage
-if __name__ == "__main__":
-    from src.models import EmailDocument, BloombergMetadata
-    
-    logging.basicConfig(level=logging.DEBUG)
-    
-    print("="*60)
-    print("METADATA MAPPER TEST")
-    print("="*60)
-    
-    # Create mapper
-    mapper = MetadataMapper()
-    
-    # Create sample documents
-    metadata1 = BloombergMetadata(
-        category="BFW",
-        story_id="L123ABC",
-        topics=["AI", "Tech"],
-        people=["Elon Musk"]
-    )
-    
-    doc1 = EmailDocument(
-        outlook_entry_id="ABC123",
-        subject="Test Email 1",
-        body="Content 1",
-        raw_body="Raw 1",
-        sender="test@test.com",
-        received_date=datetime.now(),
-        bloomberg_metadata=metadata1,
-        status="complete",
-        is_stub=False
-    )
-    
-    # Add documents
-    mapper.add_document(0, doc1)
-    
-    print(f"Added {mapper.get_size()} documents")
-    
-    # Save
-    test_path = "test_metadata_mapper.pkl"
-    mapper.save(test_path)
-    print(f"Saved to {test_path}")
-    
-    # Load
-    loaded_mapper = MetadataMapper.load(test_path)
-    print(f"Loaded {loaded_mapper.get_size()} documents")
-    
-    # Cleanup
-    import os
-    if os.path.exists(test_path):
-        os.remove(test_path)
-        print("Cleaned up test file")
+    def clear(self) -> None:
+        """Clear all document mappings."""
+        self.id_to_document.clear()
+        self.logger.debug("Cleared all document mappings")
