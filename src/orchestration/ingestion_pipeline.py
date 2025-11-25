@@ -66,7 +66,8 @@ class IngestionPipeline:
         stub_manager,
         stub_matcher,
         embedding_generator,
-        vector_store
+        vector_store,
+        metadata_mapper  # ← AGGIUNTO
     ):
         """
         Initialize ingestion pipeline with all required components.
@@ -93,9 +94,10 @@ class IngestionPipeline:
         self.stub_matcher = stub_matcher
         self.embedding_generator = embedding_generator
         self.vector_store = vector_store
-        
+        self.metadata_mapper = metadata_mapper  # ← AGGIUNTO
+
         self.stats = IngestionStats()
-    
+            
     def run(self) -> IngestionStats:
         """
         Run the complete ingestion pipeline.
@@ -284,14 +286,21 @@ class IngestionPipeline:
                     self.stats.stubs_completed += 1
             
             # Step 5: Generate embedding
-            # FIX: Changed from email_document.full_text to email_document.get_full_text()
+            # Step 5: Generate embedding
             embedding = self.embedding_generator.generate_single_embedding(email_document.get_full_text())
-            
-            # Step 6: Add to vector store
-            self.vector_store.add_document(
-                embedding=embedding,
-                document=email_document
-            )
+
+            # Step 6: Add to vector store and metadata mapper
+            # Get current index size (this will be the vector_id)
+            vector_id = self.vector_store.get_index_size()
+
+            # Reshape embedding to 2D array for FAISS (required format)
+            embedding_2d = embedding.reshape(1, -1)
+
+            # Add vector to FAISS
+            self.vector_store.add_vectors(embedding_2d)
+
+            # Map vector_id to document metadata
+            self.metadata_mapper.add_documents([email_document], start_id=vector_id)
             
             # Step 7: Move email to /indexed/ folder
             self.outlook_extractor.move_to_indexed(outlook_entry_id)

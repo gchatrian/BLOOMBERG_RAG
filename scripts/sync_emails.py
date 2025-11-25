@@ -40,6 +40,7 @@ from src.stub.matcher import StubMatcher
 from src.stub.reporter import StubReporter
 from src.embedding.generator import EmbeddingGenerator
 from src.vectorstore.faiss_store import FAISSVectorStore
+from src.vectorstore.metadata_mapper import MetadataMapper  # ← AGGIUNTO
 from config.settings import (
     get_outlook_config,
     get_embedding_config,
@@ -112,8 +113,12 @@ def initialize_components(max_emails: int = None):
     stub_matcher = StubMatcher(stub_registry)
     
     # Initialize embedding components
-    # FIX: Pass model_name string instead of config object
     embedding_generator = EmbeddingGenerator(embedding_config.model_name)
+
+    # Initialize metadata mapper
+    metadata_mapper = MetadataMapper()  # ← AGGIUNTO
+
+# Load or create vector store
     
     # Load or create vector store
     if vectorstore_config.index_path.exists():
@@ -139,6 +144,7 @@ def initialize_components(max_emails: int = None):
         stub_matcher,
         embedding_generator,
         vector_store,
+        metadata_mapper,  # ← AGGIUNTO
         vectorstore_config  # FIX: Return config for save path
     )
 
@@ -224,8 +230,8 @@ def main():
         outlook_extractor.connect()
         logger.info("Outlook connection established")
         
-        # Create ingestion pipeline (pass only first 10 components)
-        pipeline = IngestionPipeline(*components[:10])
+        # Create ingestion pipeline (pass only first 11 components)
+        pipeline = IngestionPipeline(*components[:11])
         
         # Run pipeline
         logger.info("Starting ingestion pipeline...")
@@ -239,8 +245,15 @@ def main():
         # FIX #2: Pass the path to vector_store.save()
         # =============================================================
         vector_store = components[9]  # VectorStore is at index 9
+        metadata_mapper = components[10]  # MetadataMapper is at index 10
+        vectorstore_config = components[11]  # Config is now at index 11
+
         print("\nSaving vector store...")
         vector_store.save(str(vectorstore_config.index_path))
+
+        print("Saving metadata mapper...")
+        metadata_path = vectorstore_config.index_path.parent / "documents_metadata.pkl"
+        metadata_mapper.save(str(metadata_path))
         
         # Save stats
         save_sync_stats(stats)
