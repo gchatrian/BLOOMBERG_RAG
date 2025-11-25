@@ -214,14 +214,11 @@ class RetrievalToolkit:
         else:
             # Raw document
             doc = article_data
-            score = article_data.get('score', 0.0)
-        
-        # Extract metadata
-        metadata = doc.bloomberg_metadata if hasattr(doc, 'bloomberg_metadata') and doc.bloomberg_metadata else None
+            score = article_data.get('score', 0.0) if isinstance(article_data, dict) else 0.0
         
         # Build formatted article
         formatted = {
-            "subject": doc.subject if hasattr(doc, 'subject') else str(doc),
+            "subject": "",
             "date": None,
             "author": None,
             "topics": [],
@@ -231,33 +228,76 @@ class RetrievalToolkit:
             "score": round(score, 3) if isinstance(score, float) else score
         }
         
-        # Extract date
-        if metadata and hasattr(metadata, 'article_date') and metadata.article_date:
-            formatted["date"] = metadata.article_date.strftime("%Y-%m-%d")
-        elif hasattr(doc, 'received_date') and doc.received_date:
-            formatted["date"] = doc.received_date.strftime("%Y-%m-%d")
+        # Handle dict vs object
+        if isinstance(doc, dict):
+            # Dict from JSON
+            formatted["subject"] = doc.get('subject', '')
+            
+            bloomberg_metadata = doc.get('bloomberg_metadata', {})
+            if isinstance(bloomberg_metadata, dict):
+                # Extract date
+                if bloomberg_metadata.get('article_date'):
+                    date_val = bloomberg_metadata['article_date']
+                    if isinstance(date_val, str):
+                        formatted["date"] = date_val[:10]  # YYYY-MM-DD
+                    else:
+                        formatted["date"] = date_val.strftime("%Y-%m-%d")
+                elif doc.get('received_date'):
+                    date_val = doc['received_date']
+                    if isinstance(date_val, str):
+                        formatted["date"] = date_val[:10]
+                    else:
+                        formatted["date"] = date_val.strftime("%Y-%m-%d")
+                
+                # Extract author
+                formatted["author"] = bloomberg_metadata.get('author') or doc.get('sender')
+                
+                # Extract lists
+                formatted["topics"] = bloomberg_metadata.get('topics', []) or []
+                formatted["people"] = bloomberg_metadata.get('people', []) or []
+                formatted["tickers"] = bloomberg_metadata.get('tickers', []) or []
+            
+            # Extract content
+            body = doc.get('body', '')
+            if body:
+                if include_full:
+                    formatted["content"] = body
+                else:
+                    formatted["content"] = body[:max_snippet] + ("..." if len(body) > max_snippet else "")
         
-        # Extract author
-        if metadata and hasattr(metadata, 'author'):
-            formatted["author"] = metadata.author
-        elif hasattr(doc, 'sender'):
-            formatted["author"] = doc.sender
-        
-        # Extract Bloomberg metadata
-        if metadata:
-            if hasattr(metadata, 'topics') and metadata.topics:
-                formatted["topics"] = metadata.topics
-            if hasattr(metadata, 'people') and metadata.people:
-                formatted["people"] = metadata.people
-            if hasattr(metadata, 'tickers') and metadata.tickers:
-                formatted["tickers"] = metadata.tickers
-        
-        # Extract content
-        if hasattr(doc, 'body'):
-            if include_full:
-                formatted["content"] = doc.body
-            else:
-                formatted["content"] = doc.body[:max_snippet] + ("..." if len(doc.body) > max_snippet else "")
+        else:
+            # EmailDocument object
+            formatted["subject"] = doc.subject if hasattr(doc, 'subject') else str(doc)
+            
+            metadata = doc.bloomberg_metadata if hasattr(doc, 'bloomberg_metadata') and doc.bloomberg_metadata else None
+            
+            # Extract date
+            if metadata and hasattr(metadata, 'article_date') and metadata.article_date:
+                formatted["date"] = metadata.article_date.strftime("%Y-%m-%d")
+            elif hasattr(doc, 'received_date') and doc.received_date:
+                formatted["date"] = doc.received_date.strftime("%Y-%m-%d")
+            
+            # Extract author
+            if metadata and hasattr(metadata, 'author'):
+                formatted["author"] = metadata.author
+            elif hasattr(doc, 'sender'):
+                formatted["author"] = doc.sender
+            
+            # Extract Bloomberg metadata
+            if metadata:
+                if hasattr(metadata, 'topics') and metadata.topics:
+                    formatted["topics"] = metadata.topics
+                if hasattr(metadata, 'people') and metadata.people:
+                    formatted["people"] = metadata.people
+                if hasattr(metadata, 'tickers') and metadata.tickers:
+                    formatted["tickers"] = metadata.tickers
+            
+            # Extract content
+            if hasattr(doc, 'body') and doc.body:
+                if include_full:
+                    formatted["content"] = doc.body
+                else:
+                    formatted["content"] = doc.body[:max_snippet] + ("..." if len(doc.body) > max_snippet else "")
         
         return formatted
     

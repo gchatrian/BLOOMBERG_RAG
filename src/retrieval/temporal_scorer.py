@@ -6,12 +6,56 @@ Implements exponential decay scoring based on article date to boost recent docum
 
 import logging
 import math
-from typing import List, Optional
+from typing import List, Optional, Any, Union
 from datetime import datetime, timedelta
 
-from src.models import EmailDocument
-
 logger = logging.getLogger(__name__)
+
+
+def _get_document_date(doc: Any) -> Optional[datetime]:
+    """
+    Extract date from document (handles both dict and EmailDocument).
+    
+    Args:
+        doc: Document as dict or EmailDocument object
+        
+    Returns:
+        datetime or None
+    """
+    article_date = None
+    
+    if isinstance(doc, dict):
+        # Handle dict from JSON
+        bloomberg_metadata = doc.get('bloomberg_metadata', {})
+        if isinstance(bloomberg_metadata, dict) and bloomberg_metadata.get('article_date'):
+            date_val = bloomberg_metadata['article_date']
+            if isinstance(date_val, str):
+                try:
+                    article_date = datetime.fromisoformat(date_val.replace('Z', '+00:00'))
+                except:
+                    pass
+            elif isinstance(date_val, datetime):
+                article_date = date_val
+        
+        if article_date is None and doc.get('received_date'):
+            date_val = doc['received_date']
+            if isinstance(date_val, str):
+                try:
+                    article_date = datetime.fromisoformat(date_val.replace('Z', '+00:00'))
+                except:
+                    pass
+            elif isinstance(date_val, datetime):
+                article_date = date_val
+    else:
+        # Handle EmailDocument object
+        if hasattr(doc, 'bloomberg_metadata') and doc.bloomberg_metadata:
+            if hasattr(doc.bloomberg_metadata, 'article_date') and doc.bloomberg_metadata.article_date:
+                article_date = doc.bloomberg_metadata.article_date
+        
+        if article_date is None and hasattr(doc, 'received_date') and doc.received_date:
+            article_date = doc.received_date
+    
+    return article_date
 
 
 class TemporalScorer:
@@ -22,9 +66,9 @@ class TemporalScorer:
         score = exp(-ln(2) * days_ago / halflife)
     
     This ensures:
-    - Recent articles (days_ago=0) to score=1.0
-    - Articles at halflife age to score=0.5
-    - Old articles to scoreto0.0
+    - Recent articles (days_ago=0) → score=1.0
+    - Articles at halflife age → score=0.5
+    - Old articles → score→0.0
     
     Attributes:
         halflife_days: Number of days for score to decay to 0.5
@@ -77,18 +121,6 @@ class TemporalScorer:
             
         Returns:
             Recency score between 0 and 1 (higher = more recent)
-            
-        Example:
-            >>> scorer = TemporalScorer(halflife_days=30)
-            >>> # Article from today
-            >>> score_today = scorer.calculate_recency_score(datetime.now())
-            >>> print(score_today)
-            1.0
-            >>> # Article from 30 days ago
-            >>> old_date = datetime.now() - timedelta(days=30)
-            >>> score_old = scorer.calculate_recency_score(old_date)
-            >>> print(score_old)
-            0.5
         """
         # Handle missing date
         if article_date is None:
@@ -98,6 +130,12 @@ class TemporalScorer:
         # Use current time as reference if not provided
         if reference_date is None:
             reference_date = datetime.now()
+        
+        # Make both timezone-naive for comparison
+        if hasattr(article_date, 'tzinfo') and article_date.tzinfo is not None:
+            article_date = article_date.replace(tzinfo=None)
+        if hasattr(reference_date, 'tzinfo') and reference_date.tzinfo is not None:
+            reference_date = reference_date.replace(tzinfo=None)
         
         # Calculate days difference
         days_ago = (reference_date - article_date).total_seconds() / 86400.0
@@ -114,31 +152,25 @@ class TemporalScorer:
         score = max(0.0, min(1.0, score))
         
         logger.debug(
-            f"Article from {days_ago:.1f} days ago to recency score: {score:.3f}"
+            f"Article from {days_ago:.1f} days ago → recency score: {score:.3f}"
         )
         
         return score
     
     def calculate_scores(
         self,
-        documents: List[EmailDocument],
+        documents: List[Any],
         reference_date: Optional[datetime] = None
     ) -> List[float]:
         """
         Calculate recency scores for multiple documents.
         
         Args:
-            documents: List of EmailDocument instances
+            documents: List of documents (dict or EmailDocument)
             reference_date: Reference date for calculation (default: now)
             
         Returns:
             List of recency scores (same order as input documents)
-            
-        Example:
-            >>> scorer = TemporalScorer(halflife_days=30)
-            >>> scores = scorer.calculate_scores([doc1, doc2, doc3])
-            >>> for doc, score in zip(documents, scores):
-            ...     print(f"{doc.subject}: {score:.3f}")
         """
         if not documents:
             return []
@@ -146,22 +178,16 @@ class TemporalScorer:
         scores = []
         
         for doc in documents:
-            # Try to get article date from metadata first
-            article_date = None
-            if doc.metadata and doc.metadata.article_date:
-                article_date = doc.metadata.article_date
-            elif doc.received_time:
-                # Fallback to received time
-                article_date = doc.received_time
-            
+            article_date = _get_document_date(doc)
             score = self.calculate_recency_score(article_date, reference_date)
             scores.append(score)
         
-        logger.debug(
-            f"Calculated recency scores for {len(documents)} documents: "
-            f"mean={sum(scores)/len(scores):.3f}, "
-            f"min={min(scores):.3f}, max={max(scores):.3f}"
-        )
+        if scores:
+            logger.debug(
+                f"Calculated recency scores for {len(documents)} documents: "
+                f"mean={sum(scores)/len(scores):.3f}, "
+                f"min={min(scores):.3f}, max={max(scores):.3f}"
+            )
         
         return scores
     
@@ -169,22 +195,11 @@ class TemporalScorer:
         """
         Get theoretical score for document of given age.
         
-        Useful for understanding decay curve.
-        
         Args:
             days_ago: Age in days
             
         Returns:
             Expected recency score
-            
-        Example:
-            >>> scorer = TemporalScorer(halflife_days=30)
-            >>> print(f"Score at 0 days: {scorer.get_score_at_age(0):.3f}")
-            Score at 0 days: 1.000
-            >>> print(f"Score at 30 days: {scorer.get_score_at_age(30):.3f}")
-            Score at 30 days: 0.500
-            >>> print(f"Score at 90 days: {scorer.get_score_at_age(90):.3f}")
-            Score at 90 days: 0.125
         """
         if days_ago < 0:
             return 1.0

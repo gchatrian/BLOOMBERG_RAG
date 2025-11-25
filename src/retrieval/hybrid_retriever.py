@@ -16,6 +16,44 @@ from src.retrieval.metadata_filter import MetadataFilter
 logger = logging.getLogger(__name__)
 
 
+def _get_document_subject(doc: Any) -> str:
+    """Extract subject from document (handles both dict and EmailDocument)."""
+    if isinstance(doc, dict):
+        return doc.get('subject', 'Unknown')
+    return doc.subject if hasattr(doc, 'subject') else str(doc)
+
+
+def _get_document_date_str(doc: Any) -> str:
+    """Extract date string from document (handles both dict and EmailDocument)."""
+    from datetime import datetime
+    
+    if isinstance(doc, dict):
+        bloomberg_metadata = doc.get('bloomberg_metadata', {})
+        if isinstance(bloomberg_metadata, dict):
+            article_date = bloomberg_metadata.get('article_date')
+            if article_date:
+                if isinstance(article_date, str):
+                    return article_date[:10]
+                elif isinstance(article_date, datetime):
+                    return article_date.strftime("%Y-%m-%d")
+        
+        received_date = doc.get('received_date')
+        if received_date:
+            if isinstance(received_date, str):
+                return received_date[:10]
+            elif isinstance(received_date, datetime):
+                return received_date.strftime("%Y-%m-%d")
+        return "Unknown"
+    else:
+        # EmailDocument object
+        if hasattr(doc, 'bloomberg_metadata') and doc.bloomberg_metadata:
+            if hasattr(doc.bloomberg_metadata, 'article_date') and doc.bloomberg_metadata.article_date:
+                return doc.bloomberg_metadata.article_date.strftime("%Y-%m-%d")
+        if hasattr(doc, 'received_date') and doc.received_date:
+            return doc.received_date.strftime("%Y-%m-%d")
+        return "Unknown"
+
+
 @dataclass
 class HybridSearchResult(SearchResult):
     """
@@ -150,6 +188,7 @@ class HybridRetriever:
                 - 'date_range': tuple of (start_date, end_date)
                 - 'topics': list of topics
                 - 'people': list of people
+                - 'tickers': list of tickers
             recency_weight: Weight for recency score (default: use default_recency_weight)
                            0.0 = pure semantic, 1.0 = pure recency
             
@@ -159,27 +198,6 @@ class HybridRetriever:
         Raises:
             ValueError: If query is empty or parameters are invalid
             RuntimeError: If search fails
-            
-        Example:
-            >>> from datetime import datetime, timedelta
-            >>> retriever = HybridRetriever(semantic_ret, temporal_scorer, filter)
-            >>> 
-            >>> # Search with filters
-            >>> filters = {
-            ...     'date_range': (datetime.now() - timedelta(days=30), None),
-            ...     'topics': ['Technology', 'AI']
-            ... }
-            >>> results = retriever.search(
-            ...     "tech sector news",
-            ...     top_k=10,
-            ...     filters=filters,
-            ...     recency_weight=0.4  # 60% semantic, 40% recency
-            ... )
-            >>> 
-            >>> for result in results:
-            ...     breakdown = result.get_score_breakdown()
-            ...     print(f"{result.rank}. {result.document.subject}")
-            ...     print(f"   Combined: {breakdown['combined_score']:.3f}")
         """
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
@@ -281,7 +299,7 @@ class HybridRetriever:
             logger.error(f"Hybrid search failed: {e}")
             raise RuntimeError(f"Hybrid search failed: {e}")
     
-    def explain_ranking(
+    def search_with_breakdown(
         self,
         query: str,
         top_k: int = 5,
@@ -310,14 +328,16 @@ class HybridRetriever:
         for result in results:
             breakdown = result.get_score_breakdown()
             
-            output += f"[{result.rank}] {result.document.subject}\n"
+            # Use helper function to get subject
+            subject = _get_document_subject(result.document)
+            output += f"[{result.rank}] {subject}\n"
             output += f"    Semantic: {breakdown['semantic_score']:.3f} | "
             output += f"Recency: {breakdown['recency_score']:.3f} | "
             output += f"Combined: {breakdown['combined_score']:.3f}\n"
             
-            # Date info
-            if result.document.metadata and result.document.metadata.article_date:
-                date_str = result.document.metadata.article_date.strftime("%Y-%m-%d")
+            # Date info using helper function
+            date_str = _get_document_date_str(result.document)
+            if date_str != "Unknown":
                 output += f"    Date: {date_str}\n"
             
             # Topics
