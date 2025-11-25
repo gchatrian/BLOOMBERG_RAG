@@ -15,10 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 # Import required models
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-from models import StubEntry
+from src.models import StubEntry
 
 logger = logging.getLogger(__name__)
 
