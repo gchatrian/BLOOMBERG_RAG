@@ -93,7 +93,8 @@ class RetrievalToolkit:
         if self._embedding_generator is None:
             logger.info("Loading embedding generator...")
             if EmbeddingGenerator is not None:
-                self._embedding_generator = EmbeddingGenerator()
+                model_name = self.embedding_config.model_name if self.embedding_config else None
+                self._embedding_generator = EmbeddingGenerator(model_name)
             else:
                 raise RuntimeError("EmbeddingGenerator not available")
         return self._embedding_generator
@@ -216,7 +217,7 @@ class RetrievalToolkit:
             score = article_data.get('score', 0.0)
         
         # Extract metadata
-        metadata = doc.metadata if hasattr(doc, 'metadata') and doc.metadata else None
+        metadata = doc.bloomberg_metadata if hasattr(doc, 'bloomberg_metadata') and doc.bloomberg_metadata else None
         
         # Build formatted article
         formatted = {
@@ -233,8 +234,8 @@ class RetrievalToolkit:
         # Extract date
         if metadata and hasattr(metadata, 'article_date') and metadata.article_date:
             formatted["date"] = metadata.article_date.strftime("%Y-%m-%d")
-        elif hasattr(doc, 'received_time') and doc.received_time:
-            formatted["date"] = doc.received_time.strftime("%Y-%m-%d")
+        elif hasattr(doc, 'received_date') and doc.received_date:
+            formatted["date"] = doc.received_date.strftime("%Y-%m-%d")
         
         # Extract author
         if metadata and hasattr(metadata, 'author'):

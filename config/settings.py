@@ -53,19 +53,22 @@ class OutlookConfig:
 
 @dataclass
 class EmbeddingConfig:
-    """Embedding model settings."""
+    """Sentence transformer model settings."""
     
-    # Model name (sentence-transformers)
-    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # Model name (English-only for best performance)
+    model_name: str = "all-mpnet-base-v2"
     
-    # Embedding dimension (must match model output)
-    embedding_dim: int = 384
+    # Device to use
+    device: str = "cpu"  # or "cuda" if GPU available
     
-    # Batch size for embedding generation
+    # Batch size for encoding
     batch_size: int = 32
     
-    # Device (cuda, cpu, or auto)
-    device: str = "cpu"
+    # Normalize embeddings (required for FAISS)
+    normalize_embeddings: bool = True
+    
+    # Expected embedding dimension
+    embedding_dim: int = 768  # for all-mpnet-base-v2
 
 
 # ============================================================================
