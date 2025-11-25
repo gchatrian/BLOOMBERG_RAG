@@ -5,11 +5,12 @@ Handles stub completion and cleanup via Story ID or fingerprint matching.
 
 from typing import Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 import logging
 
 # Import required modules
-from src.models import EmailDocument, StubEntry, BloombergMetadata
-from stub.registry import StubRegistry
+from src.models import EmailDocument, StubEntry
+from src.stub.registry import StubRegistry
 
 
 class StubMatcher:
@@ -225,110 +226,3 @@ class StubMatcher:
         else:
             self.logger.error(f"ERROR Failed to complete stub for: {email_document.subject[:50]}...")
             return False, stub_entry
-
-
-# Example usage
-if __name__ == "__main__":
-    from datetime import datetime
-    from models import BloombergMetadata
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    print("="*60)
-    print("STUB MATCHER TEST")
-    print("="*60)
-    
-    # Create test registry
-    test_registry_path = Path("test_stub_registry.json")
-    registry = StubRegistry(test_registry_path)
-    
-    # Create matcher with registry
-    matcher = StubMatcher(registry)
-    
-    # Create test stub entry and add to registry
-    stub_entry = StubEntry(
-        outlook_entry_id="STUB_ABC123",
-        story_id="L123ABC456",
-        fingerprint="swiss watch exports fell again in october_20241120",
-        subject="Swiss Watch Exports Fell Again in October",
-        received_time=datetime(2024, 11, 20, 10, 30),
-        status="pending"
-    )
-    
-    registry.add_stub(stub_entry)
-    print("\n1. Added test stub to registry:")
-    print(f"   Subject: {stub_entry.subject}")
-    print(f"   Story ID: {stub_entry.story_id}")
-    print(f"   Status: {stub_entry.status}")
-    
-    # Create complete email with matching Story ID
-    metadata = BloombergMetadata(
-        story_id="L123ABC456",
-        category="BFW",
-        author="John Doe"
-    )
-    
-    complete_doc = EmailDocument(
-        outlook_entry_id="COMPLETE_XYZ789",
-        subject="Swiss Watch Exports Fell Again in October on US Tariff Hit",
-        body="Full article content here...",
-        raw_body="Raw body...",
-        sender="bloomberg@bloomberg.net",
-        received_date=datetime(2024, 11, 20, 12, 0),
-        bloomberg_metadata=metadata,
-        status="complete",
-        is_stub=False
-    )
-    
-    print("\n2. Created complete email document:")
-    print(f"   Subject: {complete_doc.subject}")
-    print(f"   Story ID: {complete_doc.bloomberg_metadata.story_id}")
-    
-    # Test Story ID matching
-    print("\n3. Testing Story ID matching...")
-    found_stub = matcher.match_by_story_id("L123ABC456")
-    
-    if found_stub:
-        print(f"   OK Found matching stub: {found_stub.subject[:50]}...")
-    else:
-        print(f"   ERROR No matching stub found")
-    
-    # Test fingerprint matching
-    print("\n4. Testing fingerprint matching...")
-    fingerprint = complete_doc.get_fingerprint()
-    print(f"   Complete email fingerprint: {fingerprint}")
-    
-    # Test find_matching_stub (will use Story ID)
-    print("\n5. Testing find_matching_stub...")
-    found = matcher.find_matching_stub(complete_doc)
-    
-    if found:
-        print(f"   OK Found match: {found.subject[:50]}...")
-        print(f"   Match method: Story ID")
-    
-    # Test update registry (without moving - no Outlook connection)
-    print("\n6. Testing registry update...")
-    success = matcher.update_registry(found)
-    
-    if success:
-        print(f"   OK Updated registry status to 'completed'")
-        
-        # Verify update
-        updated_stub = registry.get_stub_by_id(stub_entry.outlook_entry_id)
-        print(f"   Status: {updated_stub.status}")
-        print(f"   Completed at: {updated_stub.completed_at}")
-    
-    # Check statistics
-    print("\n7. Registry statistics:")
-    stats = registry.get_statistics()
-    for key, value in stats.items():
-        print(f"   {key}: {value}")
-    
-    # Cleanup test file
-    if test_registry_path.exists():
-        test_registry_path.unlink()
-        print("\nOK Cleaned up test registry file")

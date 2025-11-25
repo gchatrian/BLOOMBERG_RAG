@@ -7,8 +7,8 @@ from typing import List
 import logging
 
 # Import required modules
-from src.models import EmailDocument, StubEntry, BloombergMetadata
-from stub.registry import StubRegistry
+from src.models import EmailDocument, StubEntry
+from src.stub.registry import StubRegistry
 
 
 class StubManager:
@@ -155,76 +155,3 @@ class StubManager:
             Dict with stub counts
         """
         return self.registry.get_statistics()
-
-
-# Example usage
-if __name__ == "__main__":
-    from datetime import datetime
-    from models import BloombergMetadata
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    print("="*60)
-    print("STUB MANAGER TEST")
-    print("="*60)
-    
-    # Create test registry
-    test_registry_path = Path("test_stub_registry.json")
-    registry = StubRegistry(test_registry_path)
-    
-    # Create manager
-    manager = StubManager(registry)
-    
-    # Create test stub email document
-    metadata = BloombergMetadata(
-        story_id="L123ABC456",
-        category="BFW",
-        author=None
-    )
-    
-    stub_doc = EmailDocument(
-        outlook_entry_id="TEST_STUB_123",
-        subject="Swiss Watch Exports Fell Again in October",
-        body="Alert:\nSPOTLIGHT NEWS\nSource: BN (Bloomberg News)\nTickers...",
-        raw_body="Raw body...",
-        sender="bloomberg@bloomberg.net",
-        received_date=datetime.now(),
-        bloomberg_metadata=metadata,
-        status="stub",
-        is_stub=True
-    )
-    
-    print("\n1. Test stub document:")
-    print(f"   Subject: {stub_doc.subject}")
-    print(f"   Story ID: {stub_doc.bloomberg_metadata.story_id}")
-    print(f"   Fingerprint: {stub_doc.get_fingerprint()}")
-    
-    # Register stub (without moving - no Outlook connection in test)
-    print("\n2. Registering stub...")
-    stub_entry = manager.register_stub(stub_doc)
-    
-    if stub_entry:
-        print(f"   OK Registered: {stub_entry.subject[:50]}...")
-        print(f"   Status: {stub_entry.status}")
-    
-    # Get active stubs
-    print("\n3. Active stubs:")
-    active = manager.get_active_stubs()
-    print(f"   Count: {len(active)}")
-    for stub in active:
-        print(f"   - {stub.subject[:50]}... (Story ID: {stub.story_id})")
-    
-    # Get statistics
-    print("\n4. Stub statistics:")
-    stats = manager.get_stub_count()
-    for key, value in stats.items():
-        print(f"   {key}: {value}")
-    
-    # Cleanup test file
-    if test_registry_path.exists():
-        test_registry_path.unlink()
-        print("\nOK Cleaned up test registry file")

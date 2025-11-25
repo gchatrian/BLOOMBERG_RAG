@@ -8,8 +8,7 @@ from typing import Dict, Any
 import logging
 
 # Import models
-# ✅ CORRETTO
-from src.models import EmailDocument, StubEntry, BloombergMetadata
+from src.models import EmailDocument, BloombergMetadata
 
 
 class DocumentBuilder:
@@ -137,86 +136,3 @@ class DocumentBuilder:
             Formatted text string
         """
         return document.get_full_text()
-
-
-# Example usage
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    builder = DocumentBuilder()
-    
-    # Simulate raw email data
-    raw_email = {
-        'outlook_entry_id': 'ABC123DEF456',
-        'subject': 'BFW: AI Regulation Update',
-        'body': 'Raw body with HTML and disclaimers...',
-        'sender': 'bloomberg@bloomberg.com',
-        'received_date': datetime.now()
-    }
-    
-    # Simulate cleaned body
-    cleaned_body = """By John Doe
-January 15, 2024
-
-This is the main article content about AI regulation.
-Multiple paragraphs with substantial information.
-
-More content here discussing policy implications.
-"""
-    
-    # Simulate extracted metadata
-    metadata = BloombergMetadata(
-        author="John Doe",
-        article_date=datetime(2024, 1, 15),
-        topics=["AI", "Technology", "Regulation"],
-        people=["Elon Musk", "Sam Altman"],
-        tickers=["AAPL US", "MSFT US"],
-        category="BFW",
-        story_id="L123ABC456"
-    )
-    
-    # Build document
-    print("Building EmailDocument...")
-    document = builder.build(
-        raw_email_data=raw_email,
-        cleaned_body=cleaned_body,
-        metadata=metadata,
-        status="complete",
-        is_stub=False
-    )
-    
-    # Display results
-    print("\n" + "="*60)
-    print("BUILT DOCUMENT")
-    print("="*60)
-    print(document)
-    print("\n" + "-"*60)
-    print("Metadata:")
-    print(document.bloomberg_metadata)
-    print("\n" + "-"*60)
-    print("Full text for embedding (first 300 chars):")
-    print(document.get_full_text()[:300] + "...")
-    print("\n" + "="*60)
-    
-    # Test validation
-    print("\nValidation result:", builder.validate(document))
-    
-    # Test invalid document
-    print("\n" + "="*60)
-    print("Testing invalid document...")
-    invalid_doc = EmailDocument(
-        outlook_entry_id="",  # Missing
-        subject="Test",
-        body="",  # Too short
-        raw_body="",
-        sender="",  # Missing
-        received_date=datetime.now(),
-        bloomberg_metadata=BloombergMetadata(),
-        status="complete",
-        is_stub=False
-    )
-    print("Validation result:", builder.validate(invalid_doc))
