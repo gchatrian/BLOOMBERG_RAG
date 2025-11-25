@@ -7,10 +7,7 @@ from typing import List
 import logging
 
 # Import required modules
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-from models import EmailDocument, StubEntry
+from src.models import EmailDocument, StubEntry, BloombergMetadata
 from stub.registry import StubRegistry
 
 

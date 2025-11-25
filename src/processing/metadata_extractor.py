@@ -9,10 +9,8 @@ from typing import Optional, List
 import logging
 
 # Import BloombergMetadata from models
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-from models import BloombergMetadata
+
+from src.models import EmailDocument, StubEntry, BloombergMetadata
 
 
 class MetadataExtractor:

@@ -168,37 +168,21 @@ class OutlookExtractor:
             self.logger.error(f"ERROR Failed to extract emails: {e}")
             raise
     
-    def move_email(self, outlook_entry_id: str, target_folder_path: str) -> bool:
+    def move_email(self, outlook_entry_id: str, target_folder_path: str) -> tuple[bool, Optional[str]]:
         """
-        Move an email to a different folder.
-        
-        Args:
-            outlook_entry_id: Unique Outlook EntryID of the email
-            target_folder_path: Destination folder path
-            
-        Returns:
-            True if successful, False otherwise
+        Move email and return (success, new_entry_id).
+        EntryID changes after move operation.
         """
-        if not self.namespace:
-            raise Exception("Not connected to Outlook. Call connect() first.")
-        
         try:
-            # Get the email by EntryID
             email = self.namespace.GetItemFromID(outlook_entry_id)
-            
-            # Get target folder
             target_folder = self.get_folder(target_folder_path)
-            
-            # Move email
-            email.Move(target_folder)
-            
-            self.logger.debug(f"OK Moved email '{email.Subject[:30]}...' to {target_folder_path}")
-            return True
-            
+            moved_email = email.Move(target_folder)
+            new_entry_id = moved_email.EntryID  # ← Nuovo ID dopo move
+            return True, new_entry_id
         except Exception as e:
-            self.logger.error(f"ERROR Failed to move email {outlook_entry_id}: {e}")
-            return False
-    
+            self.logger.error(f"Failed to move email: {e}")
+            return False, None
+
     def move_to_indexed(self, outlook_entry_id: str) -> bool:
         """Move email to indexed folder (complete emails)."""
         return self.move_email(outlook_entry_id, self.indexed_folder_path)

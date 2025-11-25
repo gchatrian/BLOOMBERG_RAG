@@ -8,10 +8,8 @@ from typing import Dict, Any
 import logging
 
 # Import models
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-from models import EmailDocument, BloombergMetadata
+# ✅ CORRETTO
+from src.models import EmailDocument, StubEntry, BloombergMetadata
 
 
 class DocumentBuilder:

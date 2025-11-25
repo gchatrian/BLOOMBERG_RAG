@@ -10,9 +10,7 @@ from datetime import datetime
 import logging
 
 # Import models
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-from models import StubEntry
+from src.models import EmailDocument, StubEntry, BloombergMetadata
 
 
 class StubRegistry:
