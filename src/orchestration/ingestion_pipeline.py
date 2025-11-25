@@ -275,11 +275,11 @@ class IngestionPipeline:
                 matched_stub = self.stub_matcher.match_by_story_id(story_id)
                 
                 if matched_stub:
-                    logger.info(f"[MATCHING] ✓ FOUND MATCH by Story ID!")
+                    logger.info(f"[MATCHING] FOUND MATCH by Story ID!")
                     logger.info(f"[MATCHING]   Matched stub: {matched_stub.subject}")
                     logger.info(f"[MATCHING]   Stub EntryID: {matched_stub.outlook_entry_id}")
                 else:
-                    logger.info(f"[MATCHING] ✗ No match found by Story ID")
+                    logger.info(f"[MATCHING] No match found by Story ID")
             else:
                 logger.info(f"[MATCHING] No Story ID available for complete email")
             
@@ -289,11 +289,11 @@ class IngestionPipeline:
                 matched_stub = self.stub_matcher.match_by_fingerprint(fingerprint)
                 
                 if matched_stub:
-                    logger.info(f"[MATCHING] ✓ FOUND MATCH by fingerprint!")
+                    logger.info(f"[MATCHING] FOUND MATCH by fingerprint!")
                     logger.info(f"[MATCHING]   Matched stub: {matched_stub.subject}")
                     logger.info(f"[MATCHING]   Stub EntryID: {matched_stub.outlook_entry_id}")
                 else:
-                    logger.info(f"[MATCHING] ✗ No match found by fingerprint")
+                    logger.info(f"[MATCHING] No match found by fingerprint")
             
             # Step 4: If stub match found, complete the stub
             if matched_stub:
@@ -307,9 +307,9 @@ class IngestionPipeline:
                 
                 if success:
                     self.stats.stubs_completed += 1
-                    logger.info(f"[STUB COMPLETION] ✓ Successfully completed stub!")
+                    logger.info(f"[STUB COMPLETION] Successfully completed stub!")
                 else:
-                    logger.error(f"[STUB COMPLETION] ✗ Failed to complete stub")
+                    logger.error(f"[STUB COMPLETION] Failed to complete stub")
             else:
                 logger.info(f"[MATCHING] No matching stub found for this complete email")
             
