@@ -115,8 +115,18 @@ def initialize_components(max_emails: int = None):
     # Initialize embedding components
     embedding_generator = EmbeddingGenerator(embedding_config.model_name)
 
-    # Initialize metadata mapper
-    metadata_mapper = MetadataMapper()
+    # =================================================================
+    # FIX: Load existing metadata mapper OR create new one
+    # This ensures FAISS vector IDs stay synchronized with metadata
+    # =================================================================
+    metadata_path = vectorstore_config.index_path.parent / "documents_metadata.json"
+    if metadata_path.exists():
+        logger.info(f"Loading existing metadata mapper from {metadata_path}")
+        metadata_mapper = MetadataMapper.load(str(metadata_path))
+        logger.info(f"Loaded metadata mapper with {metadata_mapper.size()} documents")
+    else:
+        logger.info("No existing metadata mapper found, creating new one")
+        metadata_mapper = MetadataMapper()
     
     # Load or create vector store
     if vectorstore_config.index_path.exists():
@@ -125,9 +135,22 @@ def initialize_components(max_emails: int = None):
             str(vectorstore_config.index_path),
             embedding_config.embedding_dim
         )
+        logger.info(f"Loaded vector store with {vector_store.get_index_size()} vectors")
     else:
         logger.info("No existing vector store found, creating new one")
         vector_store = FAISSVectorStore(embedding_config.embedding_dim)
+    
+    # =================================================================
+    # VALIDATION: Check that FAISS and MetadataMapper are in sync
+    # =================================================================
+    faiss_size = vector_store.get_index_size()
+    mapper_size = metadata_mapper.size()
+    if faiss_size != mapper_size:
+        logger.warning(
+            f"SIZE MISMATCH: FAISS has {faiss_size} vectors, "
+            f"MetadataMapper has {mapper_size} documents. "
+            f"Consider running with --reset to rebuild index."
+        )
     
     logger.info("Components initialized successfully")
     
@@ -155,9 +178,7 @@ def generate_stub_report(stub_registry, stats=None) -> None:
         stub_registry: StubRegistry instance
         stats: Optional IngestionStats instance
     """
-    # =================================================================
-    # FIX: StubReporter() takes NO arguments in __init__
-    # =================================================================
+    # StubReporter() takes NO arguments in __init__
     reporter = StubReporter()
     
     # Convert stats to dict if provided
@@ -168,9 +189,7 @@ def generate_stub_report(stub_registry, stats=None) -> None:
             'stubs_completed': stats.stubs_completed
         }
     
-    # =================================================================
-    # FIX: Pass registry (and optional session_stats) to generate_report()
-    # =================================================================
+    # Pass registry (and optional session_stats) to generate_report()
     report = reporter.generate_report(stub_registry, session_stats)
     print(report)
 
@@ -216,6 +235,11 @@ def main():
         action='store_true',
         help='Enable verbose logging'
     )
+    parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Reset FAISS index and metadata mapper before sync (full rebuild)'
+    )
     
     args = parser.parse_args()
     
@@ -229,6 +253,24 @@ def main():
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
+    # Handle reset flag
+    if args.reset:
+        print("⚠️  RESET MODE: Deleting existing index and metadata...")
+        vectorstore_config = get_vectorstore_config()
+        
+        # Delete FAISS index
+        if vectorstore_config.index_path.exists():
+            vectorstore_config.index_path.unlink()
+            print(f"   Deleted: {vectorstore_config.index_path}")
+        
+        # Delete metadata mapper
+        metadata_path = vectorstore_config.index_path.parent / "documents_metadata.json"
+        if metadata_path.exists():
+            metadata_path.unlink()
+            print(f"   Deleted: {metadata_path}")
+        
+        print()
+    
     outlook_extractor = None
     
     try:
@@ -237,7 +279,7 @@ def main():
         outlook_extractor = components[0]  # Keep reference for cleanup
         stub_registry = components[5]  # StubRegistry
         vector_store = components[9]  # VectorStore
-        metadata_mapper = components[10]  # MetadataMapper
+        metadata_mapper = components[10]  # Metadata Mapper
         vectorstore_config = components[11]  # Config
         
         # Connect to Outlook BEFORE running the pipeline
@@ -277,6 +319,9 @@ def main():
         print(f"Stubs completed → /processed/: {stats.stubs_completed}")
         print(f"Errors: {stats.errors}")
         print(f"Duration: {stats.duration_seconds():.2f} seconds")
+        print()
+        print(f"FAISS index: {vector_store.get_index_size()} vectors")
+        print(f"Metadata mapper: {metadata_mapper.size()} documents")
         print("="*60)
         
         return 0
