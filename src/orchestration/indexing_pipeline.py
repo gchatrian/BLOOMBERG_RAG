@@ -154,8 +154,8 @@ class IndexingPipeline:
         logger.info(f"Processing batch of {len(batch)} documents...")
         
         try:
-            # Extract full text from documents
-            texts = [doc.full_text for doc in batch]
+            # FIX: Changed from doc.full_text to doc.get_full_text()
+            texts = [doc.get_full_text() for doc in batch]
             
             # Generate embeddings for batch
             embeddings = self.embedding_generator.encode_batch(texts)

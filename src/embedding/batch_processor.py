@@ -131,8 +131,8 @@ class IndexingPipeline:
             
             for i, doc in enumerate(documents):
                 try:
-                    # Use full_text property for complete content
-                    text = doc.full_text
+                    # FIX: Changed from doc.full_text to doc.get_full_text()
+                    text = doc.get_full_text()
                     
                     if not text or not text.strip():
                         logger.warning(f"Document {i} has empty text, skipping")

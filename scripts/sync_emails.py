@@ -112,7 +112,8 @@ def initialize_components(max_emails: int = None):
     stub_matcher = StubMatcher(stub_registry)
     
     # Initialize embedding components
-    embedding_generator = EmbeddingGenerator(embedding_config)
+    # FIX: Pass model_name string instead of config object
+    embedding_generator = EmbeddingGenerator(embedding_config.model_name)
     
     # Load or create vector store
     if vectorstore_config.index_path.exists():
@@ -142,7 +143,7 @@ def initialize_components(max_emails: int = None):
     )
 
 
-def generate_stub_report(stub_registry: StubRegistry) -> None:
+def generate_stub_report(stub_registry) -> None:
     """
     Generate and display stub report.
     

@@ -40,213 +40,230 @@ def format_article(article: dict, rank: int) -> str:
     Format article for display.
     
     Args:
-        article: Article dictionary
-        rank: Rank number (1-based)
+        article: Article dictionary with metadata
+        rank: Result rank number
         
     Returns:
-        Formatted article string
+        Formatted string
     """
-    metadata = article.get('metadata', {})
-    bloomberg = metadata.get('bloomberg_metadata', {})
+    lines = []
+    lines.append(f"\n{'='*80}")
+    lines.append(f"RESULT #{rank}")
+    lines.append(f"{'='*80}")
     
-    subject = article.get('subject', 'N/A')
-    date = bloomberg.get('article_date', metadata.get('date', 'N/A'))
-    author = bloomberg.get('author', 'N/A')
-    topics = ', '.join(bloomberg.get('topics', []))
-    people = ', '.join(bloomberg.get('people', []))
-    tickers = ', '.join(bloomberg.get('tickers', []))
+    # Title
+    if 'subject' in article:
+        lines.append(f"📰 {article['subject']}")
+    
+    # Date and Author
+    metadata_line = []
+    if 'date' in article:
+        date_str = article['date'].strftime('%Y-%m-%d') if hasattr(article['date'], 'strftime') else str(article['date'])
+        metadata_line.append(f"📅 {date_str}")
+    if 'author' in article:
+        metadata_line.append(f"✍️ {article['author']}")
+    if metadata_line:
+        lines.append(" | ".join(metadata_line))
     
     # Scores
-    semantic_score = article.get('semantic_score', 0.0)
-    temporal_score = article.get('temporal_score', 0.0)
-    combined_score = article.get('score', 0.0)
+    if 'combined_score' in article:
+        lines.append(f"\n🎯 Combined Score: {article['combined_score']:.4f}")
+        if 'semantic_score' in article:
+            lines.append(f"   └─ Semantic: {article['semantic_score']:.4f}")
+        if 'temporal_score' in article:
+            lines.append(f"   └─ Temporal: {article['temporal_score']:.4f}")
     
-    # Content snippet
-    content = article.get('body', '')
-    snippet = content[:200] + '...' if len(content) > 200 else content
+    # Topics
+    if 'topics' in article and article['topics']:
+        topics = ', '.join(article['topics'][:5])  # Show first 5
+        lines.append(f"\n🏷️  Topics: {topics}")
     
-    output = []
-    output.append(f"\n{'='*60}")
-    output.append(f"RANK #{rank}")
-    output.append(f"{'='*60}")
-    output.append(f"Subject: {subject}")
-    output.append(f"Date:    {date}")
-    output.append(f"Author:  {author}")
+    # People
+    if 'people' in article and article['people']:
+        people = ', '.join(article['people'][:5])  # Show first 5
+        lines.append(f"👤 People: {people}")
     
-    if topics:
-        output.append(f"Topics:  {topics}")
-    if people:
-        output.append(f"People:  {people}")
-    if tickers:
-        output.append(f"Tickers: {tickers}")
+    # Tickers
+    if 'tickers' in article and article['tickers']:
+        tickers = ', '.join(article['tickers'][:10])  # Show first 10
+        lines.append(f"💹 Tickers: {tickers}")
     
-    output.append(f"\nScores:")
-    output.append(f"  Semantic:  {semantic_score:.4f}")
-    output.append(f"  Temporal:  {temporal_score:.4f}")
-    output.append(f"  Combined:  {combined_score:.4f}")
+    # Preview (first 200 chars of body)
+    if 'body' in article:
+        preview = article['body'][:200].replace('\n', ' ').strip()
+        if len(article['body']) > 200:
+            preview += "..."
+        lines.append(f"\n📝 Preview: {preview}")
     
-    output.append(f"\nSnippet:")
-    output.append(f"{snippet}")
-    
-    return '\n'.join(output)
+    return '\n'.join(lines)
 
 
-def search(
-    retriever: HybridRetriever,
-    query: str,
-    top_k: int = 10,
-    recency_weight: float = 0.3,
-    start_date: str = None,
-    end_date: str = None,
-    topics: list = None,
-    people: list = None,
-    tickers: list = None
-) -> None:
+def search(retriever, query: str, top_k: int = 10, recency_weight: float = 0.3, 
+          start_date: str = None, end_date: str = None, topics: list = None,
+          people: list = None, tickers: list = None):
     """
-    Perform search and display results.
+    Execute search and display results.
     
     Args:
         retriever: HybridRetriever instance
-        query: Search query
+        query: Search query string
         top_k: Number of results to return
         recency_weight: Weight for temporal scoring (0.0-1.0)
-        start_date: Filter start date (YYYY-MM-DD)
-        end_date: Filter end date (YYYY-MM-DD)
-        topics: List of topics to filter
-        people: List of people to filter
-        tickers: List of tickers to filter
+        start_date: Start date filter (YYYY-MM-DD)
+        end_date: End date filter (YYYY-MM-DD)
+        topics: List of topics to filter by
+        people: List of people to filter by
+        tickers: List of tickers to filter by
     """
-    print("\n" + "="*60)
-    print("SEARCH QUERY")
-    print("="*60)
-    print(f"Query: {query}")
-    print(f"Top-K: {top_k}")
-    print(f"Recency Weight: {recency_weight}")
+    print(f"\n🔍 Searching for: \"{query}\"")
+    print(f"   Settings: top_k={top_k}, recency_weight={recency_weight}")
     
     # Build filters
     filters = {}
     if start_date:
-        filters['start_date'] = start_date
-        print(f"Start Date: {start_date}")
+        filters['start_date'] = datetime.strptime(start_date, '%Y-%m-%d')
     if end_date:
-        filters['end_date'] = end_date
-        print(f"End Date: {end_date}")
+        filters['end_date'] = datetime.strptime(end_date, '%Y-%m-%d')
     if topics:
         filters['topics'] = topics
-        print(f"Topics: {', '.join(topics)}")
     if people:
         filters['people'] = people
-        print(f"People: {', '.join(people)}")
     if tickers:
         filters['tickers'] = tickers
-        print(f"Tickers: {', '.join(tickers)}")
     
-    # Perform search
+    if filters:
+        print(f"   Filters: {filters}")
+    
     print("\nSearching...")
+    
+    # Execute search
     results = retriever.search(
         query=query,
         top_k=top_k,
-        filters=filters if filters else None,
-        recency_weight=recency_weight
+        recency_weight=recency_weight,
+        **filters
     )
     
     # Display results
-    print(f"\nFound {len(results)} results")
+    print(f"\n✅ Found {len(results)} results\n")
     
     for i, article in enumerate(results, 1):
         print(format_article(article, i))
     
-    print("\n" + "="*60)
+    print(f"\n{'='*80}\n")
 
 
-def interactive_mode(retriever: HybridRetriever) -> None:
+def interactive_mode(retriever):
     """
-    Interactive search mode.
+    Interactive search mode with command prompt.
     
     Args:
         retriever: HybridRetriever instance
     """
-    print("\n" + "="*60)
+    print("\n" + "="*80)
     print("BLOOMBERG RAG - INTERACTIVE SEARCH")
-    print("="*60)
+    print("="*80)
     print("\nCommands:")
-    print("  /exit             - Exit")
-    print("  /help             - Show help")
-    print("  /set top_k N      - Set top-K results (default: 10)")
-    print("  /set weight W     - Set recency weight 0.0-1.0 (default: 0.3)")
-    print("\nJust type your query to search!")
+    print("  <query>                    - Search for query")
+    print("  set top_k <n>             - Set number of results")
+    print("  set weight <w>            - Set recency weight (0.0-1.0)")
+    print("  filter topics <t1> <t2>   - Filter by topics")
+    print("  filter people <p1> <p2>   - Filter by people")
+    print("  filter tickers <t1> <t2>  - Filter by tickers")
+    print("  filter date <start> <end> - Filter by date range (YYYY-MM-DD)")
+    print("  clear filters             - Clear all filters")
+    print("  quit / exit               - Exit interactive mode")
+    print("="*80 + "\n")
     
     # Default settings
-    settings = {
-        'top_k': 10,
-        'recency_weight': 0.3
-    }
+    top_k = 10
+    recency_weight = 0.3
+    filters = {}
     
     while True:
         try:
-            user_input = input("\n> ").strip()
+            user_input = input("search> ").strip()
             
             if not user_input:
                 continue
             
-            if user_input == "/exit":
-                print("Goodbye!")
+            # Exit commands
+            if user_input.lower() in ['quit', 'exit', 'q']:
+                print("\nGoodbye!")
                 break
             
-            if user_input == "/help":
-                print("\nCommands:")
-                print("  /exit             - Exit")
-                print("  /help             - Show help")
-                print("  /set top_k N      - Set top-K results")
-                print("  /set weight W     - Set recency weight")
-                print("\nCurrent settings:")
-                print(f"  top_k: {settings['top_k']}")
-                print(f"  recency_weight: {settings['recency_weight']}")
-                continue
-            
-            if user_input.startswith("/set "):
+            # Settings commands
+            if user_input.startswith('set '):
                 parts = user_input.split()
-                if len(parts) != 3:
-                    print("Usage: /set <parameter> <value>")
-                    continue
-                
-                param = parts[1]
-                value = parts[2]
-                
-                if param == "top_k":
-                    try:
-                        settings['top_k'] = int(value)
-                        print(f"Set top_k = {settings['top_k']}")
-                    except ValueError:
-                        print("Error: top_k must be an integer")
-                
-                elif param == "weight":
-                    try:
-                        settings['recency_weight'] = float(value)
-                        if not 0.0 <= settings['recency_weight'] <= 1.0:
-                            print("Warning: weight should be between 0.0 and 1.0")
-                        print(f"Set recency_weight = {settings['recency_weight']}")
-                    except ValueError:
-                        print("Error: weight must be a float")
-                
+                if len(parts) >= 3:
+                    setting = parts[1]
+                    value = parts[2]
+                    
+                    if setting == 'top_k':
+                        top_k = int(value)
+                        print(f"✓ Set top_k = {top_k}")
+                    elif setting == 'weight':
+                        recency_weight = float(value)
+                        print(f"✓ Set recency_weight = {recency_weight}")
+                    else:
+                        print(f"❌ Unknown setting: {setting}")
                 else:
-                    print(f"Unknown parameter: {param}")
-                
+                    print("❌ Usage: set <setting> <value>")
                 continue
             
-            # Perform search
+            # Filter commands
+            if user_input.startswith('filter '):
+                parts = user_input.split()
+                if len(parts) >= 3:
+                    filter_type = parts[1]
+                    filter_values = parts[2:]
+                    
+                    if filter_type == 'topics':
+                        filters['topics'] = filter_values
+                        print(f"✓ Filtering by topics: {filter_values}")
+                    elif filter_type == 'people':
+                        filters['people'] = filter_values
+                        print(f"✓ Filtering by people: {filter_values}")
+                    elif filter_type == 'tickers':
+                        filters['tickers'] = filter_values
+                        print(f"✓ Filtering by tickers: {filter_values}")
+                    elif filter_type == 'date':
+                        if len(filter_values) == 2:
+                            filters['start_date'] = datetime.strptime(filter_values[0], '%Y-%m-%d')
+                            filters['end_date'] = datetime.strptime(filter_values[1], '%Y-%m-%d')
+                            print(f"✓ Filtering by date: {filter_values[0]} to {filter_values[1]}")
+                        else:
+                            print("❌ Usage: filter date <start> <end> (YYYY-MM-DD)")
+                    else:
+                        print(f"❌ Unknown filter type: {filter_type}")
+                else:
+                    print("❌ Usage: filter <type> <value1> [value2] ...")
+                continue
+            
+            # Clear filters
+            if user_input == 'clear filters':
+                filters = {}
+                print("✓ Cleared all filters")
+                continue
+            
+            # Otherwise treat as search query
+            query = user_input
             search(
                 retriever=retriever,
-                query=user_input,
-                top_k=settings['top_k'],
-                recency_weight=settings['recency_weight']
+                query=query,
+                top_k=top_k,
+                recency_weight=recency_weight,
+                start_date=filters.get('start_date').strftime('%Y-%m-%d') if filters.get('start_date') else None,
+                end_date=filters.get('end_date').strftime('%Y-%m-%d') if filters.get('end_date') else None,
+                topics=filters.get('topics'),
+                people=filters.get('people'),
+                tickers=filters.get('tickers')
             )
             
         except KeyboardInterrupt:
-            print("\n\nGoodbye!")
-            break
+            print("\n\nInterrupted. Type 'quit' to exit.")
         except Exception as e:
-            print(f"\nError: {e}")
+            print(f"\n❌ Error: {e}")
 
 
 def main():
@@ -322,24 +339,20 @@ def main():
             return 1
         
         # Load components
-        embedding_generator = EmbeddingGenerator(embedding_config)
+        # FIX: Pass model_name string instead of config object
+        embedding_generator = EmbeddingGenerator(embedding_config.model_name)
         
-        if vectorstore_config.index_path.exists():
-            vector_store = FAISSVectorStore.load(
-                str(vectorstore_config.index_path),
-                embedding_config.embedding_dim
-            )
-        else:
-            print(f"\nError: Vector store not found at {vectorstore_config.index_path}")
-            print("Run 'python scripts/sync_emails.py' first to index emails")
-            return 1
+        vector_store = FAISSVectorStore.load(
+            str(vectorstore_config.index_path),
+            embedding_config.embedding_dim
+        )
         
         retriever = HybridRetriever(
             vector_store=vector_store,
             embedding_generator=embedding_generator
         )
         
-        print(f"Loaded {vector_store.get_index_size()} documents")
+        print(f"✓ Loaded {vector_store.get_index_size()} documents\n")
         
         # Execute
         if args.interactive:
@@ -360,7 +373,7 @@ def main():
         return 0
         
     except Exception as e:
-        print(f"\nError: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
         return 1
