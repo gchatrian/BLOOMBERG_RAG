@@ -4,13 +4,14 @@ Manages stub_registry.json for matching stubs with complete emails.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 
 # Import models
-from src.models import EmailDocument, StubEntry, BloombergMetadata
+from src.models import StubEntry
 
 
 class StubRegistry:
@@ -262,11 +263,59 @@ class StubRegistry:
             return False
     
     @staticmethod
+    def normalize_subject(subject: str) -> str:
+        """
+        Normalize email subject by removing Bloomberg prefixes.
+        
+        Bloomberg complete emails have prefixes like:
+        - (BN) - Bloomberg News
+        - (BI) - Bloomberg Intelligence  
+        - (BBF) - Bloomberg Brief
+        - (BFW) - Bloomberg First Word
+        
+        Stub emails don't have these prefixes, so we remove them
+        for consistent fingerprint matching.
+        
+        Examples:
+            "(BN) Swiss Watch Exports..." -> "Swiss Watch Exports..."
+            "(BI) Meta Using TPUs..." -> "Meta Using TPUs..."
+            "UK INSIGHT: Gilt Gyrations..." -> "UK INSIGHT: Gilt Gyrations..."
+        
+        Args:
+            subject: Email subject string
+            
+        Returns:
+            Normalized subject without Bloomberg prefix
+        """
+        # Remove Bloomberg prefix pattern: (CAPITAL_LETTERS) at start
+        # Pattern: ^\([A-Z]+\)\s* means:
+        # ^ = start of string
+        # \( = literal opening parenthesis
+        # [A-Z]+ = one or more capital letters
+        # \) = literal closing parenthesis
+        # \s* = zero or more whitespace characters
+        normalized = re.sub(r'^\([A-Z]+\)\s*', '', subject)
+        return normalized.strip()
+    
+    @staticmethod
     def create_fingerprint(subject: str, received_date: datetime) -> str:
         """
         Create fingerprint for stub matching.
         
-        Formula: subject.lower().strip() + "_" + date (YYYYMMDD)
+        Formula: normalize_subject(subject).lower() + "_" + date (YYYYMMDD)
+        
+        CRITICAL: Normalizes subject to remove Bloomberg prefixes
+        so that stub and complete email fingerprints match.
+        
+        Examples:
+            Stub: "UK INSIGHT: Gilt Gyrations..." + 2025-11-25
+              -> "uk insight: gilt gyrations..._20251125"
+            
+            Complete: "(BN) UK INSIGHT: Gilt Gyrations..." + 2025-11-25
+              -> Normalized to "UK INSIGHT: Gilt Gyrations..."
+              -> "uk insight: gilt gyrations..._20251125"
+              
+            ✓ MATCH!
         
         Args:
             subject: Email subject
@@ -275,74 +324,13 @@ class StubRegistry:
         Returns:
             Fingerprint string
         """
-        subject_clean = subject.lower().strip()
+        # Normalize subject (remove Bloomberg prefix)
+        normalized_subject = StubRegistry.normalize_subject(subject)
+        
+        # Lowercase and strip
+        subject_clean = normalized_subject.lower().strip()
+        
+        # Format date
         date_str = received_date.strftime("%Y%m%d")
+        
         return f"{subject_clean}_{date_str}"
-
-
-# Example usage
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Create test registry
-    test_registry_path = Path("test_stub_registry.json")
-    registry = StubRegistry(test_registry_path)
-    
-    print("="*60)
-    print("STUB REGISTRY TEST")
-    print("="*60)
-    
-    # Create test stub entry
-    stub1 = StubEntry(
-        outlook_entry_id="ABC123",
-        story_id="L123ABC456",
-        fingerprint=StubRegistry.create_fingerprint(
-            "Swiss Watch Exports Fell",
-            datetime.now()
-        ),
-        subject="Swiss Watch Exports Fell Again in October",
-        received_time=datetime.now(),
-        status="pending"
-    )
-    
-    # Add stub
-    print("\n1. Adding stub to registry...")
-    registry.add_stub(stub1)
-    print(f"   OK Added: {stub1.subject}")
-    
-    # Check statistics
-    print("\n2. Registry statistics:")
-    stats = registry.get_statistics()
-    for key, value in stats.items():
-        print(f"   {key}: {value}")
-    
-    # Find by Story ID
-    print("\n3. Finding stub by Story ID...")
-    found = registry.find_by_story_id("L123ABC456")
-    if found:
-        print(f"   OK Found: {found.subject}")
-    
-    # Update status
-    print("\n4. Updating stub status to 'completed'...")
-    registry.update_status("ABC123", "completed")
-    print(f"   OK Updated")
-    
-    # Check statistics again
-    print("\n5. Registry statistics after completion:")
-    stats = registry.get_statistics()
-    for key, value in stats.items():
-        print(f"   {key}: {value}")
-    
-    # Get pending stubs
-    print("\n6. Pending stubs:")
-    pending = registry.get_all_pending()
-    print(f"   Count: {len(pending)}")
-    
-    # Cleanup test file
-    if test_registry_path.exists():
-        test_registry_path.unlink()
-        print("\nOK Cleaned up test registry file")
