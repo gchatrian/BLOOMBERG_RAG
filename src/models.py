@@ -209,13 +209,11 @@ class EmailDocument:
         return cls(**data)
     
     def get_fingerprint(self) -> str:
-        """
-        Generate a fingerprint for stub matching.
-        Combines subject + normalized date.
-        Used as fallback when story_id is not available.
-        """
+        import re
+        # Normalize subject (remove Bloomberg prefix)
+        normalized_subject = re.sub(r'^\([A-Z]+\)\s*', '', self.subject).strip()
         date_str = self.received_date.strftime("%Y%m%d")
-        subject_clean = self.subject.lower().strip()
+        subject_clean = normalized_subject.lower().strip()
         return f"{subject_clean}_{date_str}"
 
 

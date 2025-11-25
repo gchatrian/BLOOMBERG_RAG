@@ -4,7 +4,7 @@ Ingestion Pipeline for Bloomberg RAG System.
 Orchestrates the complete email ingestion workflow:
 1. Extract emails from Outlook source folder
 2. Detect stub vs complete emails
-3. For stubs: register and move to /stubs/ folder
+3. For stubs: register, move to /stubs/, UPDATE ENTRY_ID in registry
 4. For complete: clean, extract metadata, check stub match, embed, move to /indexed/
 5. Generate final report with statistics
 """
@@ -171,7 +171,10 @@ class IngestionPipeline:
     
     def _process_stub(self, raw_email: Dict[str, Any]) -> None:
         """
-        Process a stub email: register and move to /stubs/.
+        Process a stub email: register, move to /stubs/, UPDATE ENTRY_ID.
+        
+        CRITICAL FIX: When email is moved to /stubs/, Outlook changes its EntryID.
+        We must update the registry with the new EntryID so we can find the stub later.
         
         Args:
             raw_email: Raw stub email dictionary
@@ -212,12 +215,16 @@ class IngestionPipeline:
             # Register stub
             self.stub_registry.add_stub(stub_entry)
             
-            # Move to /stubs/ folder
+            # Move to /stubs/ folder - CRITICAL: capture new EntryID
             success, new_entry_id = self.outlook_extractor.move_to_stubs(outlook_entry_id)
             
             if success:
+                # CRITICAL FIX: Update registry with new EntryID after move
+                self.stub_registry.update_stub_entry_id(outlook_entry_id, new_entry_id)
+                
                 self.stats.stubs_created += 1
                 logger.info(f"Stub registered and moved to /stubs/: {subject}")
+                logger.debug(f"  Updated EntryID in registry: {new_entry_id[:30]}...")
             else:
                 logger.error(f"Failed to move stub to /stubs/: {subject}")
                 self.stats.errors += 1

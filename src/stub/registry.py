@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 
 # Import models
-from src.models import StubEntry
+from src.models import EmailDocument, StubEntry, BloombergMetadata
 
 
 class StubRegistry:
@@ -23,6 +23,7 @@ class StubRegistry:
     - Find stubs by Story ID (primary matching method)
     - Find stubs by fingerprint (fallback matching method)
     - Update stub status to "completed" when match found
+    - Update stub Outlook EntryID when email is moved
     - Persist registry to disk (JSON)
     - Load registry from disk
     
@@ -176,6 +177,39 @@ class StubRegistry:
         
         return True
     
+    def update_stub_entry_id(self, old_entry_id: str, new_entry_id: str) -> bool:
+        """
+        Update stub's Outlook EntryID after email is moved.
+        
+        CRITICAL: When an email is moved in Outlook, its EntryID changes.
+        This method updates the registry with the new EntryID so we can
+        find and move the stub later.
+        
+        Args:
+            old_entry_id: Original Outlook EntryID
+            new_entry_id: New Outlook EntryID after move
+            
+        Returns:
+            True if updated, False if stub not found
+        """
+        stub = self.get_stub_by_id(old_entry_id)
+        
+        if not stub:
+            self.logger.warning(f"Stub not found for EntryID update: {old_entry_id}")
+            return False
+        
+        # Update the EntryID
+        stub.outlook_entry_id = new_entry_id
+        
+        self.logger.info(f"Updated stub EntryID: {stub.subject[:50]}...")
+        self.logger.debug(f"  Old: {old_entry_id[:30]}...")
+        self.logger.debug(f"  New: {new_entry_id[:30]}...")
+        
+        # Save to disk
+        self.save()
+        
+        return True
+    
     def get_all_pending(self) -> List[StubEntry]:
         """
         Get all stubs with "pending" status.
@@ -211,6 +245,12 @@ class StubRegistry:
             "pending_with_story_id": len([s for s in pending if s.story_id]),
             "pending_without_story_id": len([s for s in pending if not s.story_id])
         }
+    
+    def clear(self) -> None:
+        """Clear all stubs from registry."""
+        self.stubs.clear()
+        self.save()
+        self.logger.info("Cleared registry")
     
     def save(self) -> bool:
         """
@@ -267,55 +307,51 @@ class StubRegistry:
         """
         Normalize email subject by removing Bloomberg prefixes.
         
-        Bloomberg complete emails have prefixes like:
-        - (BN) - Bloomberg News
-        - (BI) - Bloomberg Intelligence  
-        - (BBF) - Bloomberg Brief
-        - (BFW) - Bloomberg First Word
-        
-        Stub emails don't have these prefixes, so we remove them
+        Bloomberg emails have prefixes like (BN), (BI), (BBF), (BFW), etc.
+        Stubs don't have these prefixes, so we need to remove them
         for consistent fingerprint matching.
+        
+        Pattern: ^\([A-Z]+\)\s*
+        - ^ = start of string
+        - \( = literal opening parenthesis
+        - [A-Z]+ = one or more capital letters
+        - \) = literal closing parenthesis
+        - \s* = zero or more whitespace
         
         Examples:
             "(BN) Swiss Watch Exports..." -> "Swiss Watch Exports..."
             "(BI) Meta Using TPUs..." -> "Meta Using TPUs..."
-            "UK INSIGHT: Gilt Gyrations..." -> "UK INSIGHT: Gilt Gyrations..."
+            "UK INSIGHT: Gilt..." -> "UK INSIGHT: Gilt..." (unchanged)
         
         Args:
-            subject: Email subject string
+            subject: Email subject to normalize
             
         Returns:
             Normalized subject without Bloomberg prefix
         """
-        # Remove Bloomberg prefix pattern: (CAPITAL_LETTERS) at start
-        # Pattern: ^\([A-Z]+\)\s* means:
-        # ^ = start of string
-        # \( = literal opening parenthesis
-        # [A-Z]+ = one or more capital letters
-        # \) = literal closing parenthesis
-        # \s* = zero or more whitespace characters
         normalized = re.sub(r'^\([A-Z]+\)\s*', '', subject)
         return normalized.strip()
     
     @staticmethod
     def create_fingerprint(subject: str, received_date: datetime) -> str:
         """
-        Create fingerprint for stub matching.
+        Create fingerprint for stub matching with Bloomberg prefix normalization.
         
-        Formula: normalize_subject(subject).lower() + "_" + date (YYYYMMDD)
+        CRITICAL: Uses normalize_subject() to remove Bloomberg prefixes
+        before creating fingerprint. This ensures stub and complete email
+        fingerprints match even though complete emails have (BN), (BI), etc.
         
-        CRITICAL: Normalizes subject to remove Bloomberg prefixes
-        so that stub and complete email fingerprints match.
+        Formula: normalize(subject).lower().strip() + "_" + date (YYYYMMDD)
         
         Examples:
-            Stub: "UK INSIGHT: Gilt Gyrations..." + 2025-11-25
-              -> "uk insight: gilt gyrations..._20251125"
+            Stub subject: "UK INSIGHT: Gilt Gyrations..."
+            Fingerprint: "uk insight: gilt gyrations..._20251125"
             
-            Complete: "(BN) UK INSIGHT: Gilt Gyrations..." + 2025-11-25
-              -> Normalized to "UK INSIGHT: Gilt Gyrations..."
-              -> "uk insight: gilt gyrations..._20251125"
-              
-            ✓ MATCH!
+            Complete subject: "(BI) UK INSIGHT: Gilt Gyrations..."
+            Normalized: "UK INSIGHT: Gilt Gyrations..." (prefix removed)
+            Fingerprint: "uk insight: gilt gyrations..._20251125"
+            
+            Result: MATCH!
         
         Args:
             subject: Email subject
@@ -327,10 +363,8 @@ class StubRegistry:
         # Normalize subject (remove Bloomberg prefix)
         normalized_subject = StubRegistry.normalize_subject(subject)
         
-        # Lowercase and strip
+        # Create fingerprint
         subject_clean = normalized_subject.lower().strip()
-        
-        # Format date
         date_str = received_date.strftime("%Y%m%d")
         
         return f"{subject_clean}_{date_str}"
