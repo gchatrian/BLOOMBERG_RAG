@@ -4,6 +4,9 @@ Bloomberg RAG Agent - Google ADK Agent Definition
 This module defines the root_agent for the Bloomberg RAG system using
 Google ADK framework with OpenAI GPT-4o via LiteLLM.
 
+The agent uses hybrid_search to retrieve documents and synthesize answers.
+Filter tools have been removed as they were too restrictive.
+
 Usage:
     cd bloomberg-rag
     adk web
@@ -24,6 +27,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Change working directory to project root for proper imports
+os.chdir(PROJECT_ROOT)
+
 from google.adk.agents import Agent
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types
@@ -33,11 +39,6 @@ from .prompt import SYSTEM_PROMPT, AGENT_DESCRIPTION, AGENT_NAME
 
 # Import tools from project root tools/ directory
 from tools.hybrid_search import hybrid_search
-from tools.semantic_search import semantic_search
-from tools.filter_by_date import filter_by_date
-from tools.filter_by_topic import filter_by_topic
-from tools.filter_by_people import filter_by_people
-from tools.filter_by_ticker import filter_by_ticker
 from tools.get_current_datetime import get_current_datetime
 
 
@@ -48,7 +49,7 @@ from tools.get_current_datetime import get_current_datetime
 # Model settings (can be overridden via .env)
 MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-4o")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4000"))  # Increased for longer RAG responses
 
 
 # ============================================================================
@@ -73,20 +74,9 @@ root_agent = Agent(
     ),
     
     # Tools available to the agent
+    # Only hybrid_search - filters removed as too restrictive
     tools=[
-        # Primary search tool (most powerful)
         hybrid_search,
-        
-        # Basic semantic search
-        semantic_search,
-        
-        # Filter tools
-        filter_by_date,
-        filter_by_topic,
-        filter_by_people,
-        filter_by_ticker,
-        
-        # Utility tools
         get_current_datetime,
     ],
 )
@@ -101,7 +91,7 @@ __all__ = ["root_agent"]
 if __name__ == "__main__":
     print(f"Agent: {root_agent.name}")
     print(f"Description: {root_agent.description}")
-    print(f"Model: openai/gpt-4o via LiteLLM")
+    print(f"Model: {MODEL_NAME} via LiteLLM")
     print(f"Tools: {len(root_agent.tools)}")
     for tool in root_agent.tools:
         print(f"  - {tool.__name__}")

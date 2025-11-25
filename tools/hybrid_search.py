@@ -1,140 +1,86 @@
 """
 Google ADK Tool: Hybrid Search
 
-This tool performs comprehensive search combining semantic similarity,
-temporal relevance, and optional metadata filters. This is the most
-powerful search tool and should be used for most user queries.
+This tool performs comprehensive search combining semantic similarity
+and temporal relevance. Filters have been removed as they were too restrictive.
+
+The tool returns full article content for RAG synthesis.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime
+from typing import Dict, Any
 from tools import get_toolkit
 
 logger = logging.getLogger(__name__)
 
 
-def hybrid_search(
-    query: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    topics: Optional[List[str]] = None,
-    people: Optional[List[str]] = None,
-    tickers: Optional[List[str]] = None
-) -> Dict[str, Any]:
+def hybrid_search(query: str) -> Dict[str, Any]:
     """
-    Search Bloomberg emails with semantic + temporal ranking and filters.
+    Search Bloomberg emails with semantic + temporal ranking.
     
-    This is the MOST POWERFUL search tool. Use it when:
-    - You need recent articles (temporal scoring boosts newer content)
-    - You want to filter by date range, topics, people, or tickers
-    - You need comprehensive search results
+    This is the PRIMARY search tool for the RAG system. It retrieves
+    relevant Bloomberg articles that the agent will use to synthesize
+    answers to user questions.
     
     The tool combines:
-    1. Semantic similarity (content relevance)
+    1. Semantic similarity (content relevance to the query)
     2. Temporal scoring (newer articles get higher scores)
-    3. Optional metadata filters (topics, people, tickers, dates)
     
     Args:
         query: Search query describing what to look for.
+               Be descriptive and include relevant keywords.
                Examples:
-               - "Federal Reserve interest rate decisions"
-               - "artificial intelligence regulation"
-               - "semiconductor supply chain"
-               
-        start_date: Filter articles from this date onwards (YYYY-MM-DD format).
-                   Examples: "2024-01-01", "2024-10-15"
-                   
-        end_date: Filter articles up to this date (YYYY-MM-DD format).
-                 Examples: "2024-12-31", "2024-10-20"
-                 
-        topics: Filter by Bloomberg topics (list of topic names).
-               Examples: ["Technology", "Finance"], ["Energy", "Climate"]
-               Common topics: "Technology", "Finance", "Energy", "Healthcare",
-                            "Politics", "Markets", "Economy"
-               
-        people: Filter by people mentioned in articles (list of names).
-               Examples: ["Elon Musk"], ["Jerome Powell", "Janet Yellen"]
-               
-        tickers: Filter by stock tickers mentioned (list of ticker symbols).
-                Examples: ["TSLA"], ["AAPL", "GOOGL", "MSFT"]
+               - "Federal Reserve interest rate decisions monetary policy"
+               - "Tesla earnings revenue electric vehicles"
+               - "oil prices crude energy market OPEC"
+               - "artificial intelligence regulation technology policy"
+               - "EUR USD euro dollar exchange rate forex"
     
     Returns:
         Dictionary containing:
         - success: Whether the search succeeded
-        - articles: List of matching articles with metadata
+        - articles: List of matching articles with FULL content
           - subject: Article title
           - date: Publication date (YYYY-MM-DD)
           - author: Article author
           - topics: Bloomberg topics (list)
           - people: People mentioned (list)
           - tickers: Stock tickers mentioned (list)
-          - content: Article snippet or full content
-          - score: Combined score (semantic + temporal)
+          - content: FULL article content for RAG synthesis
+          - score: Combined relevance score
         - count: Number of articles returned
-        - query_info: Query and filter metadata
+        - total_found: Total articles matching query
+        - query_info: Query metadata
         - message: Status or error message
     
     Example:
-        >>> hybrid_search(
-        ...     query="Tesla earnings",
-        ...     start_date="2024-01-01",
-        ...     topics=["Technology"],
-        ...     tickers=["TSLA"]
-        ... )
+        >>> hybrid_search("Federal Reserve interest rates inflation")
         {
             "success": True,
             "articles": [
                 {
-                    "subject": "Tesla Reports Record Q3 Earnings",
-                    "date": "2024-10-15",
+                    "subject": "Fed Signals Rate Cuts Ahead",
+                    "date": "2024-11-15",
                     "author": "John Smith",
-                    "topics": ["Technology", "Earnings"],
-                    "people": ["Elon Musk"],
-                    "tickers": ["TSLA"],
-                    "content": "Tesla Inc. reported record earnings...",
+                    "content": "The Federal Reserve indicated that...",
                     "score": 0.92
-                }
-            ],
-            "count": 1,
-            "query_info": {
-                "query": "Tesla earnings",
-                "search_type": "hybrid",
-                "filters_applied": {
-                    "start_date": "2024-01-01",
-                    "topics": ["Technology"],
-                    "tickers": ["TSLA"]
                 },
-                "timestamp": "2025-11-20T14:30:00"
-            },
-            "message": "Found 1 articles"
+                ...
+            ],
+            "count": 20,
+            "message": "Found 20 articles"
         }
     """
     try:
         logger.info(f"Hybrid search for query: {query}")
         
-        # Build filters dict
-        filters = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
-        if topics:
-            filters["topics"] = topics
-        if people:
-            filters["people"] = people
-        if tickers:
-            filters["tickers"] = tickers
-        
-        logger.info(f"Filters: {filters}")
-        
         # Get toolkit
         toolkit = get_toolkit()
         
-        # Perform hybrid search
+        # Perform hybrid search WITHOUT filters
         results = toolkit.search_hybrid(
             query=query,
-            filters=filters if filters else None
+            filters=None  # No filters - let semantic search do the work
         )
         
         # Format response
@@ -142,11 +88,10 @@ def hybrid_search(
             articles=results,
             query_info={
                 "query": query,
-                "search_type": "hybrid",
-                "filters_applied": filters
+                "search_type": "hybrid"
             },
             success=True,
-            message=f"Found {len(results)} articles" if results else "No articles found matching your query and filters"
+            message=f"Found {len(results)} articles" if results else "No articles found matching your query"
         )
         
         logger.info(f"Hybrid search returned {response['count']} articles")
@@ -160,14 +105,7 @@ def hybrid_search(
             "count": 0,
             "query_info": {
                 "query": query,
-                "search_type": "hybrid",
-                "filters_applied": {
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "topics": topics,
-                    "people": people,
-                    "tickers": tickers
-                }
+                "search_type": "hybrid"
             },
             "message": f"Search failed: {str(e)}"
         }
@@ -178,4 +116,4 @@ def hybrid_search(
 # ============================================================================
 
 TOOL_NAME = "hybrid_search"
-TOOL_DESCRIPTION = "Comprehensive search with semantic similarity, temporal ranking, and metadata filters"
+TOOL_DESCRIPTION = "Search Bloomberg articles with semantic similarity and temporal ranking"

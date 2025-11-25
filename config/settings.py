@@ -121,14 +121,14 @@ class ToolConfig:
     """Google ADK Tools configuration."""
     
     # Result limits
-    max_articles_per_call: int = 10  # max articles returned by any tool
+    max_articles_per_call: int = 40  # max articles returned by any tool
     max_snippet_length: int = 200  # max characters for article snippet
     
     # Retrieval defaults (before limiting results)
     default_top_k: int = 20  # retrieve 20, then limit to max_articles_per_call
     
     # Response settings
-    include_full_content: bool = False  # if True, include full article body instead of snippet
+    include_full_content: bool = True  # if True, include full article body instead of snippet
     
     # Caching (optional for MVP)
     enable_caching: bool = False
